@@ -210,7 +210,7 @@ export function paginaResumen({ resumen, cuentas, stockBajo, ventas, flash, csrf
           (v) => `<tr>
       <td class="tenue">${escapar(fechaHora(v.creado_en))}</td>
       <td><a href="/admin/cuenta/${encodeURIComponent(v.usuario_id)}">${escapar(v.email)}</a></td>
-      <td>${detalleVenta(v.detalle)}${v.anulada ? ' <span class="chip rojo">anulada</span>' : ''}</td>
+      <td><a href="/admin/venta/${encodeURIComponent(v.usuario_id)}/${encodeURIComponent(v.id)}">${detalleVenta(v.detalle)}</a></td>
       <td class="num">${pesos(v.total_centavos)}</td>
     </tr>`,
         )
@@ -319,7 +319,7 @@ ${aviso(flash)}
   });
 }
 
-export function paginaAlmacen({ items, resumen, traslados, cuentas, flash, csrf, volver }) {
+export function paginaAlmacen({ items, resumen, traslados, cuentas, porVendedor = [], flash, csrf, volver }) {
   const opcionesCuentas = cuentas
     .map((c) => `<option value="${escapar(c.id)}">${escapar(c.email)}</option>`)
     .join('');
@@ -404,13 +404,89 @@ export function paginaAlmacen({ items, resumen, traslados, cuentas, flash, csrf,
         .map(
           (t) => `<tr>
       <td class="tenue">${escapar(fechaHora(new Date(t.creado_en).getTime()))}</td>
+      <td>${t.tipo === 'devolucion' ? '<span class="chip ambar">devolución</span>' : '<span class="chip verde">envío</span>'}</td>
       <td>${escapar(t.producto)}</td>
       <td><a href="/admin/cuentas">${escapar(t.email)}</a></td>
-      <td class="num">+${t.cantidad}</td>
+      <td class="num ${t.tipo === 'devolucion' ? 'verde-texto' : ''}">${t.tipo === 'devolucion' ? '−' : '+'}${t.cantidad}</td>
     </tr>`,
         )
         .join('')
-    : '<tr><td colspan="4" class="vacio">Todavía no se envió nada a los vendedores.</td></tr>';
+    : '<tr><td colspan="5" class="vacio">Todavía no hay envíos ni devoluciones.</td></tr>';
+
+  const dialogosVendedor = [];
+  const bloquesVendedores = porVendedor.length
+    ? porVendedor
+        .map((v) => {
+          const filasProductos = v.productos
+            .map((p) => {
+              const dialogoDevolver = `vnd-devolver-${p.id}`;
+              const dialogoEditar = `vnd-editar-${p.id}`;
+              const base = `/admin/cuenta/${encodeURIComponent(v.id)}/producto/${encodeURIComponent(p.id)}`;
+
+              if (p.stock_actual > 0) {
+                dialogosVendedor.push(`<dialog class="modal" id="${dialogoDevolver}">
+  <form method="post" action="/admin/almacen/devolucion">
+    <h3>Devolver al almacén</h3>
+    <input type="hidden" name="csrf" value="${escapar(csrf)}">
+    <input type="hidden" name="volver" value="${escapar(volver)}">
+    <input type="hidden" name="cuenta" value="${escapar(v.id)}">
+    <input type="hidden" name="producto" value="${escapar(p.id)}">
+    <p class="ayuda"><strong>${escapar(v.email)}</strong> tiene <strong>${p.stock_actual}</strong> de ${escapar(p.nombre)}. Al devolverlos, salen de su inventario, vuelven al almacén y le llegan al teléfono en la próxima sincronización.</p>
+    <label>Cantidad <input type="number" name="cantidad" value="${p.stock_actual}" min="1" max="${p.stock_actual}" step="1" required class="corto"></label>
+    <div class="modal-acciones">
+      <button type="button" class="boton fantasma" data-cerrar>Cancelar</button>
+      <button type="submit" class="boton primario">Devolver</button>
+    </div>
+  </form>
+</dialog>`);
+              }
+
+              dialogosVendedor.push(`<dialog class="modal" id="${dialogoEditar}">
+  <form method="post" action="${base}">
+    <h3>Editar producto de ${escapar(v.email)}</h3>
+    <input type="hidden" name="csrf" value="${escapar(csrf)}">
+    <input type="hidden" name="volver" value="${escapar(volver)}">
+    <label>Nombre <input name="nombre" value="${escapar(p.nombre)}" required maxlength="80"></label>
+    <label>Precio de venta <input name="precio" value="${editable(p.precio_centavos)}" required inputmode="decimal"></label>
+    <label class="check"><input type="checkbox" name="activo" value="1"${p.activo ? ' checked' : ''}> Activo (se puede vender)</label>
+    <p class="ayuda">El cambio se guarda en su cuenta y le llega al teléfono en la próxima sincronización.</p>
+    <div class="modal-acciones">
+      <button type="button" class="boton fantasma" data-cerrar>Cancelar</button>
+      <button type="submit" class="boton primario">Guardar</button>
+    </div>
+  </form>
+</dialog>`);
+
+              return `<tr>
+      <td>${escapar(p.nombre)}${p.activo ? '' : ' <span class="chip gris">archivado</span>'}</td>
+      <td class="num"><span class="chip ${p.stock_actual <= 0 ? 'rojo' : p.stock_actual <= 2 ? 'ambar' : 'verde'}">${p.stock_actual}</span></td>
+      <td class="num">${pesos(p.precio_centavos)}</td>
+      <td class="acciones">
+        <button type="button" class="boton mini" data-abrir="${dialogoEditar}">Editar</button>
+        ${p.stock_actual > 0 ? `<button type="button" class="boton mini primario" data-abrir="${dialogoDevolver}">Devolver</button>` : ''}
+      </td>
+    </tr>`;
+            })
+            .join('');
+
+          return `<article class="vendedor-panel">
+    <header>
+      <div>
+        <strong>${escapar(v.email)}</strong><br>
+        <small class="tenue">${v.productos.length} ${v.productos.length === 1 ? 'producto' : 'productos'} · ${v.unidades} unidades · ${pesos(v.valor)} a la venta</small>
+      </div>
+      <a class="boton mini" href="/admin/cuenta/${encodeURIComponent(v.id)}">Ver cuenta</a>
+    </header>
+    <div class="tabla-scroll">
+    <table class="tabla compacta">
+      <thead><tr><th>Producto</th><th class="num">Tiene</th><th class="num">Precio</th><th></th></tr></thead>
+      <tbody>${filasProductos}</tbody>
+    </table>
+    </div>
+  </article>`;
+        })
+        .join('')
+    : '<p class="ayuda">Todavía no hay productos en manos de los vendedores. Enviá stock desde la tabla de arriba.</p>';
 
   return documento({
     titulo: 'Almacén',
@@ -441,6 +517,13 @@ ${cuentas.length === 0 ? '<p class="ayuda">Todavía no hay cuentas de vendedor: 
 </section>
 
 <section class="panel">
+  <h2>En manos de los vendedores</h2>
+  <p class="ayuda">Lo que cada vendedor tiene en su teléfono, actualizado con la última sincronización. Desde acá se le corrige el precio o se devuelve mercadería al depósito.</p>
+  <div class="vendedores-stock">${bloquesVendedores}</div>
+  ${dialogosVendedor.join('\n  ')}
+</section>
+
+<section class="panel">
   <h2>Agregar al almacén</h2>
   <form method="post" action="/admin/almacen" class="formulario en-linea-form">
     <input type="hidden" name="csrf" value="${escapar(csrf)}">
@@ -454,10 +537,10 @@ ${cuentas.length === 0 ? '<p class="ayuda">Todavía no hay cuentas de vendedor: 
 </section>
 
 <section class="panel">
-  <h2>Últimos envíos a vendedores</h2>
+  <h2>Últimos movimientos</h2>
   <div class="tabla-scroll">
   <table class="tabla">
-    <thead><tr><th>Cuándo</th><th>Producto</th><th>Vendedor</th><th class="num">Cantidad</th></tr></thead>
+    <thead><tr><th>Cuándo</th><th>Tipo</th><th>Producto</th><th>Vendedor</th><th class="num">Cantidad</th></tr></thead>
     <tbody>${filasTraslados}</tbody>
   </table>
   </div>
@@ -634,7 +717,7 @@ export function paginaCuenta({ cuenta, productos, ventas, items, movimientos, fl
             )
             .join('');
           return `<tr>
-      <td class="tenue">${escapar(fechaHora(v.creado_en))}</td>
+      <td class="tenue"><a href="/admin/venta/${encodeURIComponent(cuenta.id)}/${encodeURIComponent(v.id)}">${escapar(fechaHora(v.creado_en))}</a></td>
       <td class="num">${pesos(v.total_centavos)}</td>
       <td class="num">${celdaGanancia(v)}</td>
       <td>${v.anulada ? '<span class="chip rojo">anulada</span>' : '<span class="chip verde">cobrada</span>'}</td>
@@ -768,18 +851,27 @@ export function paginaVentas({
 
   const filas = ventas.length
     ? ventas
-        .map(
-          (v) => `<tr>
-      <td class="tenue">${escapar(fechaHora(v.creado_en))}</td>
+        .map((v) => {
+          const detalleHref = `/admin/venta/${encodeURIComponent(v.usuario_id)}/${encodeURIComponent(v.id)}`;
+          return `<tr>
+      <td class="tenue"><a href="${detalleHref}">${escapar(fechaHora(v.creado_en))}</a></td>
       <td><a href="/admin/cuenta/${encodeURIComponent(v.usuario_id)}">${escapar(v.email)}</a></td>
-      <td>${detalleVenta(v.detalle)}</td>
+      <td><a href="${detalleHref}">${detalleVenta(v.detalle)}</a></td>
       <td class="num">${pesos(v.total_centavos)}</td>
       <td class="num">${celdaGanancia(v)}</td>
       <td>${v.anulada ? '<span class="chip rojo">anulada</span>' : '<span class="chip verde">cobrada</span>'}</td>
-    </tr>`,
-        )
+      <td class="acciones"><a class="boton mini" href="${detalleHref}">Ver</a></td>
+    </tr>`;
+        })
         .join('')
-    : '<tr><td colspan="6" class="vacio">No hay ventas en ese período.</td></tr>';
+    : '<tr><td colspan="7" class="vacio">No hay ventas en ese período.</td></tr>';
+
+  const consultaPdf = new URLSearchParams();
+  if (filtros.usuarioId) consultaPdf.set('cuenta', filtros.usuarioId);
+  if (filtros.desde) consultaPdf.set('desde', filtros.desde);
+  if (filtros.hasta) consultaPdf.set('hasta', filtros.hasta);
+  const consulta = consultaPdf.toString();
+  const hrefPdf = `/admin/ventas.pdf${consulta ? `?${consulta}` : ''}`;
 
   return documento({
     titulo: 'Ventas',
@@ -798,6 +890,7 @@ ${aviso(flash)}
     <label>Hasta <input type="date" name="hasta" value="${escapar(filtros.hasta ?? '')}"></label>
     <button type="submit" class="boton primario">Filtrar</button>
     <a class="boton fantasma" href="/admin/ventas">Limpiar</a>
+    <a class="boton" href="${escapar(hrefPdf)}">Descargar PDF</a>
   </form>
 </section>
 
@@ -813,6 +906,63 @@ ${aviso(flash)}
     <tbody>${filas}</tbody>
   </table>
   </div>
+</section>`,
+  });
+}
+
+export function paginaVenta({ venta, cuenta, flash, csrf }) {
+  const items = venta.detalle ?? [];
+  const cantidad = items.reduce((suma, item) => suma + item.cantidad, 0);
+  const filas = items.length
+    ? items
+        .map(
+          (item) => `<tr>
+      <td>${escapar(item.nombre)}</td>
+      <td class="num">${item.cantidad}</td>
+      <td class="num">${pesos(item.precio_centavos)}</td>
+      <td class="num">${pesos(item.cantidad * item.precio_centavos)}</td>
+    </tr>`,
+        )
+        .join('')
+    : '<tr><td colspan="4" class="vacio">La venta no tiene ítems guardados.</td></tr>';
+
+  const base = `/admin/venta/${encodeURIComponent(venta.usuario_id)}/${encodeURIComponent(venta.id)}`;
+  const ganancia =
+    venta.anulada
+      ? { valor: '—', pie: 'anulada' }
+      : venta.ganancia == null
+        ? { valor: 'sin costo', pie: 'falta el costo en el almacén' }
+        : { valor: pesos(venta.ganancia), pie: 'venta − compra' };
+
+  return documento({
+    titulo: `Venta del ${fechaHora(venta.creado_en)}`,
+    activo: 'ventas',
+    csrf,
+    contenido: `
+<p class="migas"><a href="/admin/ventas">Ventas</a> / <a href="/admin/cuenta/${encodeURIComponent(venta.usuario_id)}">${escapar(cuenta.email)}</a> / ${escapar(fechaHora(venta.creado_en))}</p>
+<h1>Venta del ${escapar(fechaHora(venta.creado_en))}</h1>
+${aviso(flash)}
+<p class="ayuda">${escapar(cuenta.email)} · ${venta.anulada ? '<span class="chip rojo">anulada</span>' : '<span class="chip verde">cobrada</span>'}</p>
+
+<section class="tarjetas">
+  ${tarjeta('Total', pesos(venta.total_centavos), `${cantidad} ${cantidad === 1 ? 'unidad' : 'unidades'}`)}
+  ${tarjeta('Ganancia', ganancia.valor, ganancia.pie)}
+  ${tarjeta('Productos', String(items.length), 'en esta venta')}
+</section>
+
+<section class="panel">
+  <div class="tabla-scroll">
+  <table class="tabla">
+    <thead><tr><th>Producto</th><th class="num">Cantidad</th><th class="num">Precio</th><th class="num">Subtotal</th></tr></thead>
+    <tbody>${filas}</tbody>
+    <tfoot><tr><th colspan="3">Total</th><th class="num">${pesos(venta.total_centavos)}</th></tr></tfoot>
+  </table>
+  </div>
+  <p class="acciones fila-acciones">
+    <a class="boton primario" href="${base}/pdf">Descargar PDF</a>
+    <a class="boton" href="/admin/cuenta/${encodeURIComponent(venta.usuario_id)}">Ver la cuenta</a>
+    <a class="boton fantasma" href="/admin/ventas">Volver a ventas</a>
+  </p>
 </section>`,
   });
 }

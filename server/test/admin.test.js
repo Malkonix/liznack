@@ -71,6 +71,19 @@ function csrfDe(texto) {
   return encontrado[1];
 }
 
+/** Descarga binaria (PDF): no se puede leer como texto. */
+async function descarga(url, ruta, cookie) {
+  const respuesta = await fetch(`${url}${ruta}`, {
+    headers: cookie ? { cookie } : {},
+    redirect: 'manual',
+  });
+  return {
+    estado: respuesta.status,
+    tipo: respuesta.headers.get('content-type') ?? '',
+    contenido: Buffer.from(await respuesta.arrayBuffer()),
+  };
+}
+
 async function enviarFormulario(url, ruta, cookie, csrf, campos) {
   return fetch(`${url}${ruta}`, {
     method: 'POST',
@@ -693,7 +706,9 @@ test('el almacén reparte stock a los vendedores y muestra dónde está cada pro
     assert.ok(conVendedor.texto.includes(ana.datos.usuario.email), 'tiene que nombrar al vendedor');
     assert.match(conVendedor.texto, /· 4</);
     assert.doesNotMatch(conVendedor.texto, /nadie todavía/);
-    assert.match(conVendedor.texto, /Últimos envíos a vendedores/);
+    assert.match(conVendedor.texto, /Últimos movimientos/);
+    assert.match(conVendedor.texto, /En manos de los vendedores/);
+    assert.match(conVendedor.texto, /Devolver/);
 
     // 5. Segundo envío al mismo vendedor: suma, no duplica.
     await enviarFormulario(s.url, `/admin/almacen/${articuloId}/enviar`, cookie, csrf, {
@@ -896,6 +911,229 @@ test('el portal muestra qué se vendió y la ganancia de cada venta', async () =
     const ventasSinCosto = await pagina(s.url, '/admin/ventas', cookie);
     assert.match(ventasSinCosto.texto, /sin costo/);
     assert.match(ventasSinCosto.texto, /1 venta sin costo/);
+  } finally {
+    await s.cerrar();
+  }
+});
+
+test('el vendedor devuelve mercadería al almacén y el padre le corrige el precio', async () => {
+  const s = await arrancar();
+  try {
+    const cookie = await sesionAdmin(s.url);
+    const ana = await api(s.url, '/api/registro', {
+      metodo: 'POST',
+      cuerpo: { email: `ana${randomUUID().slice(0, 8)}@ejemplo.com`, contrasena: 'dulce123' },
+    });
+    const usuarioId = ana.datos.usuario.id;
+
+    const panel = await pagina(s.url, '/admin/almacen', cookie);
+    const csrf = csrfDe(panel.texto);
+    await enviarFormulario(s.url, '/admin/almacen', cookie, csrf, {
+      nombre: 'Chocolate',
+      costo: '3,00',
+      precio: '5,00',
+      stock: '10',
+      volver: '/admin/almacen',
+    });
+    const articuloId = s.db.prepare('SELECT id FROM almacen').get().id;
+    await enviarFormulario(s.url, `/admin/almacen/${articuloId}/enviar`, cookie, csrf, {
+      cuenta: usuarioId,
+      cantidad: '5',
+      volver: '/admin/almacen',
+    });
+    const productoId = s.db
+      .prepare('SELECT id FROM productos WHERE usuario_id = ?')
+      .get(usuarioId).id;
+
+    // La sección nueva muestra qué tiene cada vendedor.
+    const conStock = await pagina(s.url, '/admin/almacen', cookie);
+    assert.match(conStock.texto, /En manos de los vendedores/);
+    assert.ok(conStock.texto.includes(ana.datos.usuario.email));
+    assert.match(conStock.texto, /5 unidades/);
+
+    // Devolver 2: sale de su inventario y vuelve al depósito.
+    const devolucion = await enviarFormulario(s.url, '/admin/almacen/devolucion', cookie, csrf, {
+      cuenta: usuarioId,
+      producto: productoId,
+      cantidad: '2',
+      volver: '/admin/almacen',
+    });
+    assert.equal(devolucion.status, 303);
+    assert.doesNotMatch(devolucion.headers.get('location'), /error=/);
+    assert.equal(Number(s.db.prepare('SELECT stock FROM almacen').get().stock), 7);
+
+    const inventarioAna = await api(s.url, '/api/inventario', { token: ana.datos.token });
+    assert.equal(
+      inventarioAna.datos.productos.find((p) => p.id === productoId).stock_actual,
+      3,
+    );
+
+    const movimiento = s.db
+      .prepare('SELECT cantidad, motivo, dispositivo_id FROM movimientos WHERE usuario_id = ? ORDER BY rowid DESC')
+      .get(usuarioId);
+    assert.equal(movimiento.motivo, 'devolucion');
+    assert.equal(Number(movimiento.cantidad), -2);
+    assert.equal(movimiento.dispositivo_id, 'portal-admin');
+    assert.equal(
+      s.db.prepare('SELECT tipo FROM traslados ORDER BY rowid DESC').get().tipo,
+      'devolucion',
+    );
+
+    // No se puede devolver más de lo que tiene.
+    const exceso = await enviarFormulario(s.url, '/admin/almacen/devolucion', cookie, csrf, {
+      cuenta: usuarioId,
+      producto: productoId,
+      cantidad: '9',
+      volver: '/admin/almacen',
+    });
+    assert.match(exceso.headers.get('location'), /error=/);
+    assert.equal(Number(s.db.prepare('SELECT stock FROM almacen').get().stock), 7);
+
+    // El padre le cambia el precio desde el almacén (incluso en manos del vendedor).
+    const editar = await enviarFormulario(
+      s.url,
+      `/admin/cuenta/${usuarioId}/producto/${productoId}`,
+      cookie,
+      csrf,
+      { nombre: 'Chocolate', precio: '7,50', activo: '1', volver: '/admin/almacen' },
+    );
+    assert.equal(editar.status, 303);
+    assert.doesNotMatch(editar.headers.get('location'), /error=/);
+
+    const inventarioNuevo = await api(s.url, '/api/inventario', { token: ana.datos.token });
+    assert.equal(
+      inventarioNuevo.datos.productos.find((p) => p.id === productoId).precio_centavos,
+      750,
+    );
+
+    const conPrecio = await pagina(s.url, '/admin/almacen', cookie);
+    assert.match(conPrecio.texto, /\$ 7,50/);
+    assert.match(conPrecio.texto, /−2/);
+    assert.match(conPrecio.texto, /devolución/);
+
+    // Un producto que nunca pasó por el almacén también se puede devolver:
+    // queda cargado en el depósito con costo 0 para corregirlo después.
+    await enviarFormulario(s.url, '/admin/inventario/producto', cookie, csrf, {
+      cuenta: usuarioId,
+      nombre: 'Gomitas',
+      precio: '2,00',
+      stock: '4',
+      volver: '/admin/almacen',
+    });
+    const gomitasId = s.db
+      .prepare('SELECT id FROM productos WHERE usuario_id = ? AND nombre = ?')
+      .get(usuarioId, 'Gomitas').id;
+    const devolucionNueva = await enviarFormulario(
+      s.url,
+      '/admin/almacen/devolucion',
+      cookie,
+      csrf,
+      { cuenta: usuarioId, producto: gomitasId, cantidad: '1', volver: '/admin/almacen' },
+    );
+    assert.equal(devolucionNueva.status, 303);
+    assert.match(decodeURIComponent(devolucionNueva.headers.get('location')), /costo 0/);
+    const gomitasAlmacen = s.db
+      .prepare('SELECT costo_centavos, stock FROM almacen WHERE nombre_clave = ?')
+      .get('gomitas');
+    assert.equal(Number(gomitasAlmacen.costo_centavos), 0);
+    assert.equal(Number(gomitasAlmacen.stock), 1);
+
+    // Y el movimiento de devolución le llega al teléfono al sincronizar.
+    const bajada = await api(s.url, '/api/sync', {
+      metodo: 'POST',
+      token: ana.datos.token,
+      cuerpo: { dispositivo_id: 'tel-a', ultima_rev: 0, cambios: {} },
+    });
+    assert.ok(
+      bajada.datos.cambios.movimientos.some((m) => m.motivo === 'devolucion'),
+      'el teléfono tiene que recibir la devolución',
+    );
+  } finally {
+    await s.cerrar();
+  }
+});
+
+test('cada venta se ve en pantalla y se descarga en PDF', async () => {
+  const s = await arrancar();
+  try {
+    const cookie = await sesionAdmin(s.url);
+    const alta = await api(s.url, '/api/registro', {
+      metodo: 'POST',
+      cuerpo: { email: `nene${randomUUID().slice(0, 8)}@ejemplo.com`, contrasena: 'dulce123' },
+    });
+    const token = alta.datos.token;
+    const usuarioId = alta.datos.usuario.id;
+
+    const p = producto();
+    const ventaId = randomUUID();
+    await api(s.url, '/api/sync', {
+      metodo: 'POST',
+      token,
+      cuerpo: { dispositivo_id: 'tel-a', ultima_rev: 0, cambios: { productos: [p] } },
+    });
+    await api(s.url, '/api/sync', {
+      metodo: 'POST',
+      token,
+      cuerpo: {
+        dispositivo_id: 'tel-a',
+        ultima_rev: 0,
+        cambios: {
+          ventas: [
+            {
+              id: ventaId,
+              creado_en: Date.now(),
+              total_centavos: 1000,
+              anulada: false,
+              actualizado_en: Date.now(),
+              dispositivo_id: 'tel-a',
+              items: [
+                {
+                  id: randomUUID(),
+                  producto_id: p.id,
+                  nombre: 'Chocolate',
+                  precio_centavos: 500,
+                  cantidad: 2,
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+    // Detalle en pantalla.
+    const detalle = await pagina(s.url, `/admin/venta/${usuarioId}/${ventaId}`, cookie);
+    assert.equal(detalle.estado, 200);
+    assert.match(detalle.texto, /Venta del/);
+    assert.match(detalle.texto, /Chocolate/);
+    assert.match(detalle.texto, /\$ 10,00/);
+    assert.match(detalle.texto, /Descargar PDF/);
+
+    // Comprobante en PDF.
+    const pdfVenta = await descarga(s.url, `/admin/venta/${usuarioId}/${ventaId}/pdf`, cookie);
+    assert.equal(pdfVenta.estado, 200);
+    assert.match(pdfVenta.tipo, /application\/pdf/);
+    assert.equal(pdfVenta.contenido.subarray(0, 5).toString(), '%PDF-');
+    const textoVenta = pdfVenta.contenido.toString('latin1');
+    assert.match(textoVenta, /Comprobante de venta/);
+    assert.ok(textoVenta.includes('Chocolate'));
+    assert.ok(textoVenta.includes('10,00'));
+
+    // Reporte con la lista y el detalle de cada venta.
+    const pdfLista = await descarga(s.url, '/admin/ventas.pdf', cookie);
+    assert.equal(pdfLista.estado, 200);
+    assert.match(pdfLista.tipo, /application\/pdf/);
+    assert.equal(pdfLista.contenido.subarray(0, 5).toString(), '%PDF-');
+    const textoLista = pdfLista.contenido.toString('latin1');
+    assert.match(textoLista, /Reporte de ventas/);
+    assert.match(textoLista, /Liznack/);
+    assert.ok(textoLista.includes('Chocolate'));
+    assert.ok(textoLista.includes('RECAUDADO'));
+
+    // Sin sesión no se descarga nada: devuelve el ingreso, no un PDF.
+    const anonimo = await descarga(s.url, '/admin/ventas.pdf');
+    assert.doesNotMatch(anonimo.tipo, /application\/pdf/);
+    assert.notEqual(anonimo.contenido.subarray(0, 5).toString(), '%PDF-');
   } finally {
     await s.cerrar();
   }

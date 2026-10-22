@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { ErrorHttp, enviarEstatico, enviarHtml, leerFormulario, obtenerIp, redirigir } from './http.js';
+import { ErrorHttp, enviarEstatico, enviarHtml, enviarPdf, leerFormulario, obtenerIp, redirigir } from './http.js';
 import { COOKIE_ADMIN, crearSeguridad, leerCookies } from './admin_auth.js';
 import * as datos from './admin_datos.js';
+import { reporteVentasPdf, ventaPdf } from './admin_pdf.js';
 import * as vistas from './admin_vistas.js';
 
 const CSS = readFileSync(new URL('./public/portal.css', import.meta.url), 'utf8');
@@ -20,6 +21,22 @@ function diaMs(texto) {
   if (!m) return null;
   const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
   return Number.isNaN(d.getTime()) ? null : d.getTime();
+}
+
+/** Filtros de la lista de ventas: los usan la pantalla y el PDF. */
+function filtrosVentas(url) {
+  const usuarioId = url.searchParams.get('cuenta') || '';
+  const desdeTexto = url.searchParams.get('desde') ?? '';
+  const hastaTexto = url.searchParams.get('hasta') ?? '';
+  const desde = diaMs(desdeTexto);
+  const hastaBase = diaMs(hastaTexto);
+  return {
+    usuarioId,
+    desdeTexto,
+    hastaTexto,
+    desde: desde ?? undefined,
+    hasta: hastaBase == null ? undefined : hastaBase + 24 * 60 * 60 * 1000,
+  };
 }
 
 function conAviso(ruta, tipo, texto) {
@@ -210,6 +227,7 @@ export function crearPortalAdmin(db, { clave, log = console.log } = {}) {
             resumen: datos.resumenAlmacen(db),
             traslados: datos.trasladosRecientes(db),
             cuentas: datos.listarCuentas(db),
+            porVendedor: datos.stockPorVendedor(db),
             flash: leerAviso(url),
             csrf,
             volver: rutaActual(url),
@@ -229,6 +247,36 @@ export function crearPortalAdmin(db, { clave, log = console.log } = {}) {
             stock: Number.parseInt(cuerpo.get('stock') ?? '', 10),
           });
           return redirigir(res, conAviso(volver, 'ok', 'Producto agregado al almacén.'));
+        } catch (error) {
+          if (error instanceof ErrorHttp) {
+            return redirigir(res, conAviso(volver, 'error', error.message));
+          }
+          throw error;
+        }
+      }
+
+      if (metodo === 'POST' && segmentos[1] === 'almacen' && segmentos[2] === 'devolucion') {
+        const cuerpo = await leerFormulario(req);
+        verificarCsrf(cuerpo, token);
+        const volver = rutaVolver(cuerpo, '/admin/almacen');
+        try {
+          const resultado = datos.devolverAlAlmacen(
+            db,
+            String(cuerpo.get('cuenta') ?? ''),
+            String(cuerpo.get('producto') ?? ''),
+            Number.parseInt(cuerpo.get('cantidad') ?? '', 10),
+          );
+          const extra = resultado.creado
+            ? ' Quedó cargado en el almacén con costo 0: corregilo cuando sepas cuánto salió.'
+            : '';
+          return redirigir(
+            res,
+            conAviso(
+              volver,
+              'ok',
+              `Volvieron ${resultado.devueltas} de "${resultado.producto}" al almacén.${extra}`,
+            ),
+          );
         } catch (error) {
           if (error instanceof ErrorHttp) {
             return redirigir(res, conAviso(volver, 'error', error.message));
@@ -446,15 +494,11 @@ export function crearPortalAdmin(db, { clave, log = console.log } = {}) {
 
       // --- ventas globales --------------------------------------------------
       if (metodo === 'GET' && ruta === '/admin/ventas') {
-        const usuarioId = url.searchParams.get('cuenta') || '';
-        const desdeTexto = url.searchParams.get('desde') ?? '';
-        const hastaTexto = url.searchParams.get('hasta') ?? '';
-        const desde = diaMs(desdeTexto);
-        const hastaBase = diaMs(hastaTexto);
+        const filtros = filtrosVentas(url);
         const resultado = datos.listarVentas(db, {
-          desde: desde ?? undefined,
-          hasta: hastaBase == null ? undefined : hastaBase + 24 * 60 * 60 * 1000,
-          usuarioId: usuarioId || undefined,
+          desde: filtros.desde,
+          hasta: filtros.hasta,
+          usuarioId: filtros.usuarioId || undefined,
         });
         return enviarHtml(
           res,
@@ -466,11 +510,59 @@ export function crearPortalAdmin(db, { clave, log = console.log } = {}) {
             gananciaTotal: resultado.ganancia_total,
             sinCosto: resultado.sin_costo,
             cuentas: datos.listarCuentas(db),
-            filtros: { usuarioId, desde: desdeTexto, hasta: hastaTexto },
+            filtros: {
+              usuarioId: filtros.usuarioId,
+              desde: filtros.desdeTexto,
+              hasta: filtros.hastaTexto,
+            },
             flash: leerAviso(url),
             csrf,
           }),
         );
+      }
+
+      if (metodo === 'GET' && ruta === '/admin/ventas.pdf') {
+        const filtros = filtrosVentas(url);
+        const resultado = datos.listarVentas(db, {
+          desde: filtros.desde,
+          hasta: filtros.hasta,
+          usuarioId: filtros.usuarioId || undefined,
+          limite: 5000,
+        });
+        const cuenta = filtros.usuarioId ? datos.obtenerCuenta(db, filtros.usuarioId) : null;
+        const pdf = reporteVentasPdf({
+          ventas: resultado.ventas,
+          total: resultado.total_centavos,
+          cantidad: resultado.cantidad,
+          ganancia: resultado.ganancia_total,
+          sinCosto: resultado.sin_costo,
+          desde: filtros.desdeTexto,
+          hasta: filtros.hastaTexto,
+          cuenta,
+        });
+        const nombre = `liznack-ventas-${vistas.iso(Date.now())}.pdf`;
+        return enviarPdf(res, pdf, nombre);
+      }
+
+      // --- una venta: detalle en pantalla y comprobante en PDF --------------
+      if (metodo === 'GET' && segmentos[1] === 'venta' && segmentos.length >= 4) {
+        const cuenta = datos.obtenerCuenta(db, segmentos[2]);
+        if (!cuenta) throw new ErrorHttp(404, 'Esa cuenta no existe.');
+        const venta = datos.detalleVenta(db, cuenta.id, segmentos[3]);
+        if (!venta) throw new ErrorHttp(404, 'Esa venta no existe.');
+
+        if (segmentos.length === 5 && segmentos[4] === 'pdf') {
+          const pdf = ventaPdf({ venta, cuenta });
+          return enviarPdf(res, pdf, `liznack-venta-${String(venta.id).slice(0, 8)}.pdf`);
+        }
+        if (segmentos.length === 4) {
+          return enviarHtml(
+            res,
+            200,
+            vistas.paginaVenta({ venta, cuenta, flash: leerAviso(url), csrf }),
+          );
+        }
+        throw new ErrorHttp(404, 'Ruta no encontrada.');
       }
 
       throw new ErrorHttp(404, 'Ruta no encontrada.');

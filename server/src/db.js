@@ -27,6 +27,10 @@ function migrar(db) {
   if (!columnas.includes('costo_centavos')) {
     db.exec('ALTER TABLE almacen ADD COLUMN costo_centavos INTEGER NOT NULL DEFAULT 0');
   }
+  const columnasTraslados = db.prepare('PRAGMA table_info(traslados)').all().map((c) => c.name);
+  if (!columnasTraslados.includes('tipo')) {
+    db.exec("ALTER TABLE traslados ADD COLUMN tipo TEXT NOT NULL DEFAULT 'envio'");
+  }
 }
 
 const ESQUEMA = `
@@ -120,13 +124,15 @@ CREATE TABLE IF NOT EXISTS almacen (
   creado_en       TEXT NOT NULL
 );
 
--- Cada salida del almacén hacia el inventario de un vendedor.
+-- Cada movimiento del depósito hacia un vendedor (envio) o de vuelta
+-- (devolucion).
 CREATE TABLE IF NOT EXISTS traslados (
   id          TEXT PRIMARY KEY,
   almacen_id  TEXT NOT NULL REFERENCES almacen (id) ON DELETE CASCADE,
   usuario_id  TEXT NOT NULL,
   producto_id TEXT NOT NULL,
   cantidad    INTEGER NOT NULL,
+  tipo        TEXT NOT NULL DEFAULT 'envio',
   creado_en   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_traslados_almacen ON traslados (almacen_id);

@@ -5,7 +5,7 @@ import { ErrorHttp } from './http.js';
 
 /** Todo lo que el portal escribe en nombre de un dueño queda marcado así. */
 export const DISPOSITIVO_PORTAL = 'portal-admin';
-const MOTIVOS = new Set(['reposicion', 'merma', 'ajuste']);
+const MOTIVOS = new Set(['reposicion', 'merma', 'ajuste', 'devolucion']);
 
 export function inicioDelDia(ahora = Date.now()) {
   const d = new Date(ahora);
@@ -277,6 +277,31 @@ export function ventasDe(db, usuarioId, limite = 50) {
 }
 
 /** Ítems de varias ventas juntos, para no consultar una vez por fila. */
+/** Una venta con su detalle, para el comprobante en pantalla y en PDF. */
+export function detalleVenta(db, usuarioId, ventaId) {
+  const fila = db
+    .prepare(
+      `SELECT v.id, v.usuario_id, v.creado_en, v.total_centavos, v.anulada,
+              u.email,
+              (SELECT COUNT(*) FROM venta_items i
+                WHERE i.usuario_id = v.usuario_id AND i.venta_id = v.id) AS items
+         FROM ventas v
+         JOIN usuarios u ON u.id = v.usuario_id
+        WHERE v.usuario_id = ? AND v.id = ?`,
+    )
+    .get(usuarioId, ventaId);
+  if (!fila) return null;
+  const [venta] = conDetalleYGanancia(db, [
+    {
+      ...fila,
+      anulada: fila.anulada === 1,
+      total_centavos: numero(fila.total_centavos),
+      items: numero(fila.items),
+    },
+  ]);
+  return venta;
+}
+
 export function itemsPorVenta(db, usuarioId, ventaIds) {
   const mapa = new Map();
   if (!Array.isArray(ventaIds) || ventaIds.length === 0) return mapa;
@@ -719,10 +744,64 @@ export function listarAlmacen(db) {
   });
 }
 
+/**
+ * Lo que tiene cada vendedor en su teléfono, agrupado por cuenta, con el
+ * vínculo al artículo del almacén cuando existe. Es la vista para devolver
+ * mercadería al depósito o corregirle el precio.
+ */
+export function stockPorVendedor(db) {
+  const articulos = new Map(
+    db
+      .prepare('SELECT id, nombre_clave FROM almacen')
+      .all()
+      .map((a) => [String(a.nombre_clave), a.id]),
+  );
+  const filas = db
+    .prepare(
+      `SELECT u.id AS usuario_id, u.email, p.id AS producto_id, p.nombre,
+              p.precio_centavos, p.activo,
+              COALESCE(s.stock_actual, p.stock_base) AS stock_actual
+         FROM productos p
+         JOIN usuarios u ON u.id = p.usuario_id
+         LEFT JOIN vista_stock s
+           ON s.usuario_id = p.usuario_id AND s.producto_id = p.id
+        ORDER BY u.email COLLATE NOCASE, p.nombre COLLATE NOCASE`,
+    )
+    .all();
+
+  const porUsuario = new Map();
+  for (const fila of filas) {
+    if (!porUsuario.has(fila.usuario_id)) {
+      porUsuario.set(fila.usuario_id, {
+        id: fila.usuario_id,
+        email: fila.email,
+        productos: [],
+        unidades: 0,
+        valor: 0,
+      });
+    }
+    const grupo = porUsuario.get(fila.usuario_id);
+    const producto = {
+      id: fila.producto_id,
+      nombre: fila.nombre,
+      precio_centavos: numero(fila.precio_centavos),
+      stock_actual: numero(fila.stock_actual),
+      activo: fila.activo === 1,
+      almacen_id: articulos.get(nombreClave(fila.nombre)) ?? null,
+    };
+    grupo.productos.push(producto);
+    if (producto.activo) {
+      grupo.unidades += producto.stock_actual;
+      grupo.valor += producto.stock_actual * producto.precio_centavos;
+    }
+  }
+  return [...porUsuario.values()];
+}
+
 export function trasladosRecientes(db, limite = 20) {
   return db
     .prepare(
-      `SELECT t.id, t.cantidad, t.creado_en, a.nombre AS producto, u.email
+      `SELECT t.id, t.cantidad, t.tipo, t.creado_en, a.nombre AS producto, u.email
          FROM traslados t
          JOIN almacen a ON a.id = t.almacen_id
          JOIN usuarios u ON u.id = t.usuario_id
@@ -730,7 +809,7 @@ export function trasladosRecientes(db, limite = 20) {
         LIMIT ?`,
     )
     .all(limite)
-    .map((f) => ({ ...f, cantidad: numero(f.cantidad) }));
+    .map((f) => ({ ...f, cantidad: numero(f.cantidad), tipo: f.tipo ?? 'envio' }));
 }
 
 export function crearArticuloAlmacen(db, { nombre, costoCentavos, precioCentavos, stock }) {
@@ -866,7 +945,8 @@ export function trasladarAVendedor(db, almacenId, usuarioId, cantidad) {
 
     db.prepare('UPDATE almacen SET stock = stock - ? WHERE id = ?').run(cantidad, item.id);
     db.prepare(
-      'INSERT INTO traslados (id, almacen_id, usuario_id, producto_id, cantidad, creado_en) VALUES (?, ?, ?, ?, ?, ?)',
+      `INSERT INTO traslados (id, almacen_id, usuario_id, producto_id, cantidad, tipo, creado_en)
+       VALUES (?, ?, ?, ?, ?, 'envio', ?)`,
     ).run(randomUUID(), item.id, usuarioId, productoId, cantidad, new Date().toISOString());
 
     db.exec('COMMIT');
@@ -875,6 +955,92 @@ export function trasladarAVendedor(db, almacenId, usuarioId, cantidad) {
       creado: !existente,
       email: cuenta.email,
       quedan: numero(item.stock) - cantidad,
+    };
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+/**
+ * Devuelve mercadería del inventario de un vendedor al almacén.
+ *
+ * No borra el producto ni la venta: registra un movimiento negativo
+ * (`devolucion`) en la cuenta del vendedor, que sube de revisión y le llega al
+ * teléfono en la próxima sincronización. En el almacén suma las unidades y
+ * registra el traslado de vuelta. Si el producto no estaba en el depósito (por
+ * ejemplo, lo creó el vendedor desde el teléfono), se crea con costo 0 y el
+ * precio que tenía el vendedor: así la mercadería no queda sin dueño.
+ */
+export function devolverAlAlmacen(db, usuarioId, productoId, cantidad) {
+  const cuenta = obtenerCuenta(db, usuarioId);
+  if (!cuenta) throw new ErrorHttp(404, 'Esa cuenta no existe.');
+  const producto = db
+    .prepare(
+      `SELECT p.id, p.nombre, p.activo, p.precio_centavos,
+              COALESCE(s.stock_actual, p.stock_base) AS stock_actual
+         FROM productos p
+         LEFT JOIN vista_stock s
+           ON s.usuario_id = p.usuario_id AND s.producto_id = p.id
+        WHERE p.usuario_id = ? AND p.id = ?`,
+    )
+    .get(usuarioId, productoId);
+  if (!producto) throw new ErrorHttp(404, 'Ese producto no está en manos del vendedor.');
+  if (!Number.isInteger(cantidad) || cantidad <= 0 || cantidad > 1_000_000) {
+    throw new ErrorHttp(400, 'La cantidad tiene que ser mayor que cero.');
+  }
+  const enMano = numero(producto.stock_actual);
+  if (cantidad > enMano) {
+    throw new ErrorHttp(
+      400,
+      `${cuenta.email} tiene ${enMano} de ${producto.nombre}. No se pueden devolver ${cantidad}.`,
+    );
+  }
+
+  const clave = nombreClave(producto.nombre);
+  const existente = db
+    .prepare('SELECT id, stock FROM almacen WHERE nombre_clave = ?')
+    .get(clave);
+
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    let almacenId = existente?.id;
+    if (!almacenId) {
+      almacenId = randomUUID();
+      db.prepare(
+        `INSERT INTO almacen (id, nombre, nombre_clave, costo_centavos, precio_centavos, stock, creado_en)
+         VALUES (?, ?, ?, 0, ?, 0, ?)`,
+      ).run(
+        almacenId,
+        String(producto.nombre).trim(),
+        clave,
+        numero(producto.precio_centavos),
+        new Date().toISOString(),
+      );
+    }
+
+    db.prepare(
+      `INSERT INTO movimientos (usuario_id, id, producto_id, cantidad, motivo,
+                                creado_en, dispositivo_id, rev)
+       VALUES (?, ?, ?, ?, 'devolucion', ?, ?, ?)`,
+    ).run(
+      usuarioId, randomUUID(), productoId, -cantidad,
+      Date.now(), DISPOSITIVO_PORTAL, siguienteRev(db, usuarioId),
+    );
+
+    db.prepare('UPDATE almacen SET stock = stock + ? WHERE id = ?').run(cantidad, almacenId);
+    db.prepare(
+      `INSERT INTO traslados (id, almacen_id, usuario_id, producto_id, cantidad, tipo, creado_en)
+       VALUES (?, ?, ?, ?, ?, 'devolucion', ?)`,
+    ).run(randomUUID(), almacenId, usuarioId, productoId, cantidad, new Date().toISOString());
+
+    db.exec('COMMIT');
+    return {
+      email: cuenta.email,
+      producto: producto.nombre,
+      devueltas: cantidad,
+      quedan: enMano - cantidad,
+      creado: !existente,
     };
   } catch (error) {
     db.exec('ROLLBACK');

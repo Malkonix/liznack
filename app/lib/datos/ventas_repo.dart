@@ -16,7 +16,10 @@ class VentasRepo {
     if (lineas.isEmpty) throw ArgumentError('El carrito está vacío.');
     final ahora = cuando ?? DateTime.now();
     final id = const Uuid().v4();
-    final total = lineas.fold(0, (suma, linea) => suma + linea.subtotalCentavos);
+    final total = lineas.fold(
+      0,
+      (suma, linea) => suma + linea.subtotalCentavos,
+    );
     final items = <ItemVenta>[];
 
     await db.transaction((txn) async {
@@ -96,7 +99,35 @@ class VentasRepo {
 
   /// Ventas más recientes con sus ítems, para el historial.
   Future<List<Venta>> recientes({int limite = 100}) async {
-    final filas = await db.query('ventas', orderBy: 'creado_en DESC', limit: limite, where: 'usuario_id = ?', whereArgs: [usuarioId]);
+    final filas = await db.query(
+      'ventas',
+      orderBy: 'creado_en DESC',
+      limit: limite,
+      where: 'usuario_id = ?',
+      whereArgs: [usuarioId],
+    );
+    return _conItems(filas);
+  }
+
+  /// Ventas de un día (de la más vieja a la más nueva), para el reporte.
+  Future<List<Venta>> delDia([DateTime? dia]) async {
+    final referencia = dia ?? DateTime.now();
+    final inicio = DateTime(referencia.year, referencia.month, referencia.day);
+    final fin = inicio.add(const Duration(days: 1));
+    final filas = await db.query(
+      'ventas',
+      where: 'usuario_id = ? AND creado_en >= ? AND creado_en < ?',
+      whereArgs: [
+        usuarioId,
+        inicio.millisecondsSinceEpoch,
+        fin.millisecondsSinceEpoch,
+      ],
+      orderBy: 'creado_en ASC',
+    );
+    return _conItems(filas);
+  }
+
+  Future<List<Venta>> _conItems(List<Map<String, Object?>> filas) async {
     if (filas.isEmpty) return [];
 
     final ids = filas.map((f) => f['id'] as String).toList();
@@ -118,7 +149,9 @@ class VentasRepo {
   }
 
   Future<int> contarPendientes() async {
-    final filas = await db.rawQuery('SELECT COUNT(*) AS total FROM ventas WHERE pendiente = 1');
+    final filas = await db.rawQuery(
+      'SELECT COUNT(*) AS total FROM ventas WHERE pendiente = 1',
+    );
     return (filas.first['total'] as int?) ?? 0;
   }
 }

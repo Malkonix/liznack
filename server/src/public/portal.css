@@ -193,6 +193,28 @@ p { margin: 0 0 0.75rem; }
 .vendedores .chip { background: var(--gris-suave); color: var(--tinta); font-weight: 600; }
 .vendedores .chip.cero { opacity: 0.55; text-decoration: line-through; }
 
+/* stock que tiene cada vendedor, en el almacén */
+.vendedores-stock {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 1rem;
+}
+.vendedor-panel {
+  border: 1px solid var(--borde);
+  border-radius: 12px;
+  padding: 0.75rem 0.85rem;
+  background: #fffdfc;
+}
+.vendedor-panel header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-bottom: 0.5rem;
+}
+.vendedor-panel header strong { font-size: 0.92rem; }
+.vendedor-panel .tabla th { font-size: 0.68rem; }
+
 /* ---------------------------------------------------------------- chips */
 
 .chip {
@@ -287,6 +309,7 @@ input[type="checkbox"] { width: auto; padding: 0; }
 
 .acciones { white-space: nowrap; }
 .acciones > * { vertical-align: middle; }
+.fila-acciones { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.9rem 0 0; }
 
 details > summary { cursor: pointer; list-style: none; }
 details > summary::-webkit-details-marker { display: none; }

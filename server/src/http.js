@@ -61,6 +61,18 @@ export function redirigir(res, ruta, { cookie } = {}) {
   res.end();
 }
 
+/** Envía un PDF generado en memoria. */
+export function enviarPdf(res, contenido, nombreArchivo) {
+  res.writeHead(200, {
+    'Content-Type': 'application/pdf',
+    'Content-Disposition': `inline; filename="${nombreArchivo}"`,
+    'Content-Length': contenido.length,
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+  });
+  res.end(contenido);
+}
+
 /** Envía HTML con las cabeceras de seguridad del portal. */
 export function enviarHtml(res, codigo, html, cabecerasExtra = {}) {
   const buf = Buffer.from(html, 'utf8');
