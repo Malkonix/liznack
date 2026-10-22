@@ -447,9 +447,10 @@ export function paginaAlmacen({ items, resumen, traslados, cuentas, porVendedor 
     <input type="hidden" name="csrf" value="${escapar(csrf)}">
     <input type="hidden" name="volver" value="${escapar(volver)}">
     <label>Nombre <input name="nombre" value="${escapar(p.nombre)}" required maxlength="80"></label>
+    <label>Costo de compra <input name="costo" value="${p.costo_centavos == null ? '' : editable(p.costo_centavos)}" inputmode="decimal" placeholder="sin costo"></label>
     <label>Precio de venta <input name="precio" value="${editable(p.precio_centavos)}" required inputmode="decimal"></label>
     <label class="check"><input type="checkbox" name="activo" value="1"${p.activo ? ' checked' : ''}> Activo (se puede vender)</label>
-    <p class="ayuda">El cambio se guarda en su cuenta y le llega al teléfono en la próxima sincronización.</p>
+    <p class="ayuda">El costo se guarda en el almacén y no llega al teléfono. El cambio de nombre o precio se guarda en su cuenta y le llega en la próxima sincronización.</p>
     <div class="modal-acciones">
       <button type="button" class="boton fantasma" data-cerrar>Cancelar</button>
       <button type="submit" class="boton primario">Guardar</button>
@@ -570,8 +571,10 @@ export function paginaInventario({ productos, totales, cuentas, filtros, flash, 
     <input type="hidden" name="volver" value="${escapar(volver)}">
     <label>Cuenta <input type="text" value="${escapar(p.email)}" disabled></label>
     <label>Nombre <input name="nombre" value="${escapar(p.nombre)}" required maxlength="80"></label>
+    <label>Costo de compra <input name="costo" value="${p.costo_centavos == null ? '' : editable(p.costo_centavos)}" inputmode="decimal" placeholder="sin costo"></label>
     <label>Precio <input name="precio" value="${(p.precio_centavos / 100).toFixed(2).replace('.', ',')}" required inputmode="decimal"></label>
     <label class="check"><input type="checkbox" name="activo" value="1"${p.activo ? ' checked' : ''}> Activo (se puede vender)</label>
+    <p class="ayuda">El costo se guarda en el almacén y no llega al teléfono.</p>
     <div class="modal-acciones">
       <button type="button" class="boton fantasma" data-cerrar>Cerrar</button>
       <button type="submit" class="boton primario">Guardar</button>
@@ -681,8 +684,10 @@ export function paginaCuenta({ cuenta, productos, ventas, items, movimientos, fl
     <h3>Editar producto</h3>
     <input type="hidden" name="csrf" value="${escapar(csrf)}">
     <label>Nombre <input name="nombre" value="${escapar(p.nombre)}" required maxlength="80"></label>
+    <label>Costo de compra <input name="costo" value="${p.costo_centavos == null ? '' : editable(p.costo_centavos)}" inputmode="decimal" placeholder="sin costo"></label>
     <label>Precio <input name="precio" value="${(p.precio_centavos / 100).toFixed(2).replace('.', ',')}" required inputmode="decimal"></label>
     <label class="check"><input type="checkbox" name="activo" value="1"${p.activo ? ' checked' : ''}> Activo (se puede vender)</label>
+    <p class="ayuda">El costo se guarda en el almacén y no llega al teléfono.</p>
     <div class="modal-acciones">
       <button type="button" class="boton fantasma" data-cerrar>Cerrar</button>
       <button type="submit" class="boton primario">Guardar</button>

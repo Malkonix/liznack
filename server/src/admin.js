@@ -407,9 +407,15 @@ export function crearPortalAdmin(db, { clave, log = console.log } = {}) {
             return redirigir(res, conAviso(volver, 'ok', 'Producto agregado.'));
           }
           if (segmentos.length === 5) {
+            const costoTexto = String(cuerpo.get('costo') ?? '').trim();
+            const costoCentavos = costoTexto ? vistas.centavosDe(costoTexto) : null;
+            if (costoTexto && costoCentavos === null) {
+              throw new ErrorHttp(400, 'El costo de compra no es un monto válido.');
+            }
             datos.editarProducto(db, cuenta.id, segmentos[4], {
               nombre: cuerpo.get('nombre'),
               precioCentavos: vistas.centavosDe(cuerpo.get('precio')),
+              costoCentavos,
               activo: cuerpo.get('activo') === '1',
             });
             return redirigir(res, conAviso(volver, 'ok', 'Producto actualizado.'));

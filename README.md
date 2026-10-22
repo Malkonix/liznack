@@ -89,7 +89,9 @@ revisión, así que el teléfono lo recibe en la próxima sincronización.
 
 El **costo de compra vive solo en el almacén**: no se guarda en los productos del
 vendedor ni viaja en la sincronización, así que el teléfono nunca lo muestra.
-El precio de venta sí llega al teléfono y es el que se cobra.
+El precio de venta sí llega al teléfono y es el que se cobra. El costo se carga
+al dar de alta el producto en **Almacén** o al editarlo desde **Almacén** o
+**Inventario**; si todavía no estaba en el depósito, se crea ahí con stock 0.
 
 La ganancia se calcula por venta como `precio de venta − costo de compra`, y se
 resume en **Resumen** (hoy y últimos 7 días) y en **Ventas**. Si un producto
@@ -142,8 +144,10 @@ Un vendedor puede devolver al almacén lo que todavía tiene. Desde
    un costo de compra.
 
 El historial **Últimos movimientos** muestra envíos y devoluciones con su tipo.
-También se puede **editar** un producto en manos del vendedor (nombre, precio y
-stock) desde esa misma tabla; el cambio sube la revisión y llega al teléfono.
+También se puede **editar** un producto en manos del vendedor (nombre, precio de
+venta y costo de compra) desde esa misma tabla o desde **Inventario**; el costo
+se guarda en el almacén, sin viajar al teléfono, y el resto sube la revisión y
+llega en la próxima sincronización.
 
 ### Releases automáticos
 

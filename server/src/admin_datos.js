@@ -236,6 +236,12 @@ export function obtenerCuenta(db, usuarioId) {
 }
 
 export function productosDe(db, usuarioId) {
+  const costos = new Map(
+    db
+      .prepare('SELECT nombre_clave, costo_centavos FROM almacen')
+      .all()
+      .map((a) => [String(a.nombre_clave), numero(a.costo_centavos)]),
+  );
   return db
     .prepare(
       `SELECT p.id, p.nombre, p.precio_centavos, p.activo, p.actualizado_en,
@@ -252,6 +258,7 @@ export function productosDe(db, usuarioId) {
       activo: f.activo === 1,
       precio_centavos: numero(f.precio_centavos),
       stock_actual: numero(f.stock_actual),
+      costo_centavos: costos.has(nombreClave(f.nombre)) ? costos.get(nombreClave(f.nombre)) : null,
     }));
 }
 
@@ -451,6 +458,25 @@ const enteroEnRango = (valor, min, max, campo) => {
   return valor;
 };
 
+/**
+ * El costo de compra vive en el almacén, que reconoce el producto por nombre.
+ * Al editar un producto del vendedor se actualiza su costo ahí; si todavía no
+ * estaba en el almacén se crea con stock 0, sin inventar mercadería.
+ */
+function guardarCostoAlmacen(db, nombre, precioCentavos, costoCentavos) {
+  const clave = nombreClave(nombre);
+  const costo = enteroEnRango(costoCentavos, 0, 100_000_000, 'costo');
+  const existente = db.prepare('SELECT id FROM almacen WHERE nombre_clave = ?').get(clave);
+  if (existente) {
+    db.prepare('UPDATE almacen SET costo_centavos = ? WHERE id = ?').run(costo, existente.id);
+    return;
+  }
+  db.prepare(
+    `INSERT INTO almacen (id, nombre, nombre_clave, costo_centavos, precio_centavos, stock, creado_en)
+     VALUES (?, ?, ?, ?, ?, 0, ?)`,
+  ).run(randomUUID(), nombre, clave, costo, precioCentavos, new Date().toISOString());
+}
+
 export function crearProducto(db, usuarioId, { nombre, precioCentavos, stock }) {
   if (!obtenerCuenta(db, usuarioId)) throw new ErrorHttp(404, 'Esa cuenta no existe.');
   const limpio = textoProducto(nombre, 'nombre');
@@ -466,19 +492,26 @@ export function crearProducto(db, usuarioId, { nombre, precioCentavos, stock }) 
   return id;
 }
 
-export function editarProducto(db, usuarioId, productoId, { nombre, precioCentavos, activo }) {
+export function editarProducto(
+  db,
+  usuarioId,
+  productoId,
+  { nombre, precioCentavos, activo, costoCentavos = null },
+) {
   const existe = db
     .prepare('SELECT 1 AS x FROM productos WHERE usuario_id = ? AND id = ?')
     .get(usuarioId, productoId);
   if (!existe) throw new ErrorHttp(404, 'Ese producto no existe.');
+  const limpio = textoProducto(nombre, 'nombre');
+  const precio = enteroEnRango(precioCentavos, 0, 100_000_000, 'precio');
   db.prepare(
     `UPDATE productos
         SET nombre = ?, precio_centavos = ?, activo = ?, actualizado_en = ?,
             dispositivo_id = ?, rev = ?
       WHERE usuario_id = ? AND id = ?`,
   ).run(
-    textoProducto(nombre, 'nombre'),
-    enteroEnRango(precioCentavos, 0, 100_000_000, 'precio'),
+    limpio,
+    precio,
     activo ? 1 : 0,
     Date.now(),
     DISPOSITIVO_PORTAL,
@@ -486,6 +519,10 @@ export function editarProducto(db, usuarioId, productoId, { nombre, precioCentav
     usuarioId,
     productoId,
   );
+  // El costo es opcional: si el campo va vacío, se deja como estaba.
+  if (costoCentavos !== null && costoCentavos !== undefined) {
+    guardarCostoAlmacen(db, limpio, precio, costoCentavos);
+  }
 }
 
 export function reponerStock(db, usuarioId, productoId, cantidad, motivo = 'reposicion') {
@@ -547,6 +584,12 @@ function filtroInventario({ usuarioId, busqueda, soloBajo, incluirArchivados } =
  */
 export function inventario(db, filtros = {}) {
   const { donde, parametros } = filtroInventario(filtros);
+  const costos = new Map(
+    db
+      .prepare('SELECT nombre_clave, costo_centavos FROM almacen')
+      .all()
+      .map((a) => [String(a.nombre_clave), numero(a.costo_centavos)]),
+  );
   const productos = db
     .prepare(
       `SELECT p.usuario_id, p.id, p.nombre, p.precio_centavos, p.activo,
@@ -566,6 +609,7 @@ export function inventario(db, filtros = {}) {
       activo: f.activo === 1,
       precio_centavos: numero(f.precio_centavos),
       stock_actual: numero(f.stock_actual),
+      costo_centavos: costos.has(nombreClave(f.nombre)) ? costos.get(nombreClave(f.nombre)) : null,
     }));
 
   const totales = db
@@ -752,9 +796,9 @@ export function listarAlmacen(db) {
 export function stockPorVendedor(db) {
   const articulos = new Map(
     db
-      .prepare('SELECT id, nombre_clave FROM almacen')
+      .prepare('SELECT id, nombre_clave, costo_centavos FROM almacen')
       .all()
-      .map((a) => [String(a.nombre_clave), a.id]),
+      .map((a) => [String(a.nombre_clave), a]),
   );
   const filas = db
     .prepare(
@@ -781,13 +825,15 @@ export function stockPorVendedor(db) {
       });
     }
     const grupo = porUsuario.get(fila.usuario_id);
+    const articulo = articulos.get(nombreClave(fila.nombre));
     const producto = {
       id: fila.producto_id,
       nombre: fila.nombre,
       precio_centavos: numero(fila.precio_centavos),
       stock_actual: numero(fila.stock_actual),
       activo: fila.activo === 1,
-      almacen_id: articulos.get(nombreClave(fila.nombre)) ?? null,
+      almacen_id: articulo?.id ?? null,
+      costo_centavos: articulo ? numero(articulo.costo_centavos) : null,
     };
     grupo.productos.push(producto);
     if (producto.activo) {

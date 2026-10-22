@@ -989,16 +989,21 @@ test('el vendedor devuelve mercadería al almacén y el padre le corrige el prec
     assert.match(exceso.headers.get('location'), /error=/);
     assert.equal(Number(s.db.prepare('SELECT stock FROM almacen').get().stock), 7);
 
-    // El padre le cambia el precio desde el almacén (incluso en manos del vendedor).
+    // El padre le cambia el precio y el costo desde el almacén (incluso en manos
+    // del vendedor): el costo se guarda en el depósito, no viaja al teléfono.
     const editar = await enviarFormulario(
       s.url,
       `/admin/cuenta/${usuarioId}/producto/${productoId}`,
       cookie,
       csrf,
-      { nombre: 'Chocolate', precio: '7,50', activo: '1', volver: '/admin/almacen' },
+      { nombre: 'Chocolate', precio: '7,50', costo: '2,25', activo: '1', volver: '/admin/almacen' },
     );
     assert.equal(editar.status, 303);
     assert.doesNotMatch(editar.headers.get('location'), /error=/);
+    assert.equal(
+      Number(s.db.prepare('SELECT costo_centavos FROM almacen').get().costo_centavos),
+      225,
+    );
 
     const inventarioNuevo = await api(s.url, '/api/inventario', { token: ana.datos.token });
     assert.equal(
@@ -1008,6 +1013,8 @@ test('el vendedor devuelve mercadería al almacén y el padre le corrige el prec
 
     const conPrecio = await pagina(s.url, '/admin/almacen', cookie);
     assert.match(conPrecio.texto, /\$ 7,50/);
+    assert.match(conPrecio.texto, /\$ 2,25/);
+    assert.match(conPrecio.texto, /value="2,25"/, 'el modal tiene que venir con el costo cargado');
     assert.match(conPrecio.texto, /−2/);
     assert.match(conPrecio.texto, /devolución/);
 
@@ -1048,6 +1055,86 @@ test('el vendedor devuelve mercadería al almacén y el padre le corrige el prec
       bajada.datos.cambios.movimientos.some((m) => m.motivo === 'devolucion'),
       'el teléfono tiene que recibir la devolución',
     );
+  } finally {
+    await s.cerrar();
+  }
+});
+
+test('el costo de compra se edita desde el producto del vendedor y queda en el almacén', async () => {
+  const s = await arrancar();
+  try {
+    const cookie = await sesionAdmin(s.url);
+    const ana = await api(s.url, '/api/registro', {
+      metodo: 'POST',
+      cuerpo: { email: `ana${randomUUID().slice(0, 8)}@ejemplo.com`, contrasena: 'dulce123' },
+    });
+    const usuarioId = ana.datos.usuario.id;
+    const choco = producto({ nombre: 'Chocolate', precio_centavos: 500, stock_base: 7 });
+
+    // Producto del teléfono: todavía no existe en el almacén.
+    await api(s.url, '/api/sync', {
+      metodo: 'POST',
+      token: ana.datos.token,
+      cuerpo: { dispositivo_id: 'tel-a', ultima_rev: 0, cambios: { productos: [choco] } },
+    });
+
+    const inventario = await pagina(s.url, '/admin/inventario', cookie);
+    const csrf = csrfDe(inventario.texto);
+    assert.match(inventario.texto, /name="costo"/, 'el modal tiene que tener costo de compra');
+
+    // Al guardarlo se crea el artículo en el almacén con stock 0.
+    const editar = await enviarFormulario(
+      s.url,
+      `/admin/cuenta/${usuarioId}/producto/${choco.id}`,
+      cookie,
+      csrf,
+      {
+        nombre: 'Chocolate',
+        precio: '5,00',
+        costo: '3,25',
+        activo: '1',
+        volver: '/admin/inventario',
+      },
+    );
+    assert.equal(editar.status, 303);
+    assert.doesNotMatch(editar.headers.get('location'), /error=/);
+
+    const articulo = s.db
+      .prepare('SELECT * FROM almacen WHERE nombre_clave = ?')
+      .get('chocolate');
+    assert.ok(articulo, 'el costo tiene que crear el artículo del almacén');
+    assert.equal(Number(articulo.costo_centavos), 325);
+    assert.equal(Number(articulo.precio_centavos), 500);
+    assert.equal(Number(articulo.stock), 0);
+
+    // Inventario, almacén y cuenta muestran el costo cargado en el modal.
+    const inv = await pagina(s.url, '/admin/inventario', cookie);
+    assert.match(inv.texto, /value="3,25"/);
+    const almacen = await pagina(s.url, '/admin/almacen', cookie);
+    assert.match(almacen.texto, /value="3,25"/);
+    const cuenta = await pagina(s.url, `/admin/cuenta/${usuarioId}`, cookie);
+    assert.match(cuenta.texto, /value="3,25"/);
+
+    // Un monto inválido no pisa nada y se avisa en el portal.
+    const malo = await enviarFormulario(
+      s.url,
+      `/admin/cuenta/${usuarioId}/producto/${choco.id}`,
+      cookie,
+      csrf,
+      { nombre: 'Chocolate', precio: '5,00', costo: 'tres', activo: '1' },
+    );
+    assert.match(malo.headers.get('location'), /error=/);
+    assert.equal(Number(s.db.prepare('SELECT costo_centavos FROM almacen').get().costo_centavos), 325);
+
+    // Vacío deja el costo como estaba.
+    await enviarFormulario(
+      s.url,
+      `/admin/cuenta/${usuarioId}/producto/${choco.id}`,
+      cookie,
+      csrf,
+      { nombre: 'Chocolate', precio: '5,00', costo: '', activo: '1' },
+    );
+    assert.equal(Number(s.db.prepare('SELECT costo_centavos FROM almacen').get().costo_centavos), 325);
   } finally {
     await s.cerrar();
   }
