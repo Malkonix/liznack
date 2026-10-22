@@ -4,6 +4,8 @@ App Android para vender golosinas (chocolates, gomitas, galletitas…) y llevar 
 inventario, con un servidor mínimo para respaldar y compartir los datos entre
 teléfonos. **Toda la interfaz está en español** y se puede vender sin internet.
 
+Repositorio: <https://github.com/Malkonix/liznack>.
+
 - Catálogo con precio y stock.
 - Venta en dos toques, con cantidades y total automático.
 - El stock baja solo con cada venta y se puede reponer.
@@ -103,6 +105,23 @@ muestra **Portal desactivado** y la API sigue funcionando igual.
 Lo que el padre cambia ahí (precio, stock, anular una venta, enviar del almacén)
 se guarda con `dispositivo_id = 'portal-admin'` y sube la revisión, así que el
 teléfono lo recibe en la próxima sincronización.
+
+### Releases automáticos
+
+Cada push a `main` corre las pruebas del servidor y de la app y, si pasan,
+publica un release con:
+
+- `liznack-<versión>.apk`: la app lista para instalar.
+- `liznack-servidor.tar.gz`: el servidor y el `docker-compose.yml`.
+
+La versión sale de `version:` en `app/pubspec.yaml` y el número de build del run
+de GitHub, así que no hay que tocar nada a mano. El workflow está en
+`.github/workflows/release.yml` y también se puede lanzar desde
+**Actions → Release → Run workflow**.
+
+```bash
+git push origin main      # pruebas + release
+```
 
 ### Con Docker (opcional)
 

@@ -75,8 +75,11 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION-build.$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
 
-      - name: Paquete del servidor
+      - name: Preparar los archivos
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
+          cp app/build/app/outputs/flutter-apk/app-release.apk "liznack-$VERSION.apk"
           tar czf liznack-servidor.tar.gz \
             --exclude='server/data' \
             --exclude='server/node_modules' \
@@ -102,8 +105,8 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           gh release create "$TAG" \
-            "app/build/app/outputs/flutter-apk/app-release.apk#liznack-$VERSION.apk" \
-            "liznack-servidor.tar.gz#liznack-servidor.tar.gz" \
+            "liznack-$VERSION.apk" \
+            "liznack-servidor.tar.gz" \
             --title "Liznack $VERSION · build $GITHUB_RUN_NUMBER" \
             --notes-file notas.md \
             --latest
