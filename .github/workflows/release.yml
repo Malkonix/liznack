@@ -1,0 +1,109 @@
+name: Release
+
+# Cada push a main genera un release con el APK y el servidor listos para usar.
+# También se puede lanzar a mano desde la pestaña Actions.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  pruebas:
+    name: Pruebas
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Servidor (API, sincronización y portal)
+        working-directory: server
+        run: npm test
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Dependencias de la app
+        working-directory: app
+        run: flutter pub get
+
+      - name: Análisis
+        working-directory: app
+        run: flutter analyze
+
+      - name: Pruebas de la app
+        working-directory: app
+        run: flutter test
+
+  release:
+    name: Publicar release
+    needs: pruebas
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 30
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Compilar el APK
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build apk --release
+
+      - name: Versión y tag
+        id: version
+        working-directory: app
+        run: |
+          VERSION="$(sed -n 's/^version: *//p' pubspec.yaml | cut -d+ -f1)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION-build.$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Paquete del servidor
+        run: |
+          tar czf liznack-servidor.tar.gz \
+            --exclude='server/data' \
+            --exclude='server/node_modules' \
+            server docker-compose.yml .env.example README.md
+
+      - name: Notas del release
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          {
+            echo "**APK**: instalá \`liznack-$VERSION.apk\` en el teléfono."
+            echo
+            echo "**Servidor**: descomprimí \`liznack-servidor.tar.gz\` y seguí el README, o usá \`docker compose up -d --build\`."
+            echo
+            echo "### Cambios"
+            git log -n 20 --pretty='- %s'
+          } > notas.md
+
+      - name: Crear el release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release create "$TAG" \
+            "app/build/app/outputs/flutter-apk/app-release.apk#liznack-$VERSION.apk" \
+            "liznack-servidor.tar.gz#liznack-servidor.tar.gz" \
+            --title "Liznack $VERSION · build $GITHUB_RUN_NUMBER" \
+            --notes-file notas.md \
+            --latest

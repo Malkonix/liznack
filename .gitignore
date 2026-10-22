@@ -1,0 +1,33 @@
+# --- Node / servidor ---------------------------------------------------------
+node_modules/
+server/node_modules/
+server/data/
+*.log
+
+# --- Configuración local -----------------------------------------------------
+.env
+.env.local
+
+# --- Flutter / Dart ----------------------------------------------------------
+app/build/
+app/.dart_tool/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/android/.gradle/
+app/android/local.properties
+app/android/app/debug/
+app/android/app/profile/
+app/android/app/release/
+app/ios/Pods/
+app/ios/.symlinks/
+app/macos/Pods/
+app/macos/Flutter/ephemeral/
+app/windows/flutter/ephemeral/
+app/linux/flutter/ephemeral/
+
+# --- Editores y sistema ------------------------------------------------------
+.idea/
+.vscode/
+*.iml
+.DS_Store
+.freebuff/

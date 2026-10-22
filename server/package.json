@@ -1,0 +1,14 @@
+{
+  "name": "liznack-servidor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Servidor mínimo (Node + SQLite) para inventario y ventas de Liznack",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/server.js",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js"
+  }
+}

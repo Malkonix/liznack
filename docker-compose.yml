@@ -1,0 +1,44 @@
+# Liznack: servidor de inventario y ventas + portal del administrador.
+#
+#   cp .env.example .env      (y cambiá LIZNACK_ADMIN)
+#   docker compose up -d --build
+#
+# El teléfono se conecta a http://<IP-de-la-máquina>:3000 y el portal queda en
+# http://<IP-de-la-máquina>:3000/admin
+
+name: liznack
+
+services:
+  servidor:
+    build:
+      context: ./server
+    image: liznack-servidor:local
+    container_name: liznack-servidor
+    restart: unless-stopped
+    init: true
+
+    ports:
+      # Solo se publica en esta máquina si LIZNACK_IP=127.0.0.1.
+      - "${LIZNACK_IP:-0.0.0.0}:${LIZNACK_PUERTO:-3000}:3000"
+
+    environment:
+      PORT: 3000
+      DATABASE_FILE: /app/data/liznack.db
+      # Solo para que el mensaje de arranque muestre el puerto correcto.
+      LIZNACK_PUERTO_PUBLICO: ${LIZNACK_PUERTO:-3000}
+      # Si queda vacía, /admin muestra "Portal desactivado" y la API sigue igual.
+      LIZNACK_ADMIN: ${LIZNACK_ADMIN:-}
+
+    volumes:
+      # Los datos sobreviven a `down`, `up` y a rebuilds de la imagen.
+      - datos:/app/data
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+volumes:
+  datos:
+    name: liznack-datos
