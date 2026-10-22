@@ -90,12 +90,13 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           {
-            echo "**APK**: instalá \`liznack-$VERSION.apk\` en el teléfono."
+            echo "**APK**: instalar \`liznack-$VERSION.apk\` en el teléfono."
             echo
-            echo "**Servidor**: descomprimí \`liznack-servidor.tar.gz\` y seguí el README, o usá \`docker compose up -d --build\`."
+            echo "**Servidor**: descomprimir \`liznack-servidor.tar.gz\` y seguir el README, o usar \`docker compose up -d --build\`."
             echo
             echo "### Cambios"
-            git log -n 20 --pretty='- %s'
+            echo
+            git log -n 6 --pretty='- %s'
           } > notas.md
 
       - name: Crear el release

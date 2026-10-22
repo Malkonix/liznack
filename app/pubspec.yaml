@@ -20,6 +20,13 @@ dependencies:
   pdf: ^3.13.1
   printing: ^5.15.1
 
+# shared_preferences_android 2.5 pasa a llamar al plugin por JNI y el R8 del
+# build release borra clases de Kotlin: la app queda en el splash con
+# NoSuchMethodError / ClassNotFoundException. La 2.4.28 usa MethodChannel.
+# Es la última 2.4.x, compatible con shared_preferences 2.5.
+dependency_overrides:
+  shared_preferences_android: 2.4.28
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

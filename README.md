@@ -11,6 +11,10 @@ Repositorio: <https://github.com/Malkonix/liznack>.
 - El stock baja solo con cada venta y se puede reponer.
 - Resumen del día: cuánto se vendió y cuánta plata entró.
 - Historial de ventas, con anulación (devuelve el stock).
+- **Reporte de venta**: el detalle de cada venta en pantalla y en PDF, para
+  compartir o imprimir, tanto en la app como en el portal del administrador.
+- **Devoluciones**: lo que ya está en manos de un vendedor puede volver al
+  almacén, y el portal muestra en todo momento **qué tiene cada vendedor**.
 - Todo se guarda primero en el teléfono y se sincroniza cuando hay red, con
   estado visible: `Pendiente`, `Sincronizado`, `Sincronizando`, `Error`.
 
@@ -58,12 +62,28 @@ El padre puede mirar y administrar todo desde el navegador:
 - **Almacén**: el depósito central. Cada producto se carga con **costo de compra
   y precio de venta**; la tabla muestra el margen por unidad y desde ahí se
   envían unidades al inventario de cada vendedor. También muestra **en qué
-  vendedores está cada producto** y cuántas unidades tiene cada uno.
+  vendedores está cada producto** y cuántas unidades tiene cada uno, con
+  **Editar** (incluso el precio) y **Devolver** al almacén.
 - **Inventario**: todos los productos de todas las cuentas, con filtros por
   vendedor, nombre, stock bajo y archivados.
 - **Cuentas**: crear, borrar, cambiar contraseña y ver el detalle de cada hijo.
 - **Ventas**: historial completo con **qué se vendió** en cada venta, cuánto
-  entró y cuánta ganancia dejó, con la opción de anular.
+  entró y cuánta ganancia dejó, con la opción de anular. Cada venta tiene su
+  página de detalle y el **PDF** del comprobante; el listado completo se
+  descarga como PDF con los filtros aplicados.
+
+Se activa con una contraseña en `LIZNACK_ADMIN`:
+
+```bash
+LIZNACK_ADMIN=tu-clave npm start
+```
+
+y queda en `http://<IP-del-servidor>:3000/admin`. Sin esa variable, `/admin`
+muestra **Portal desactivado** y la API sigue funcionando igual.
+
+Lo que el padre cambia ahí (precio, stock, anular una venta, enviar del almacén,
+una devolución) se guarda con `dispositivo_id = 'portal-admin'` y sube la
+revisión, así que el teléfono lo recibe en la próxima sincronización.
 
 ### Compras y ganancias
 
@@ -79,6 +99,21 @@ vendido no está en el almacén, no hay costo conocido: la venta se marca
 El almacén también resume **invertido** (costo × unidades), **valor de venta**
 (precio × unidades) y la **ganancia** que dejaría si se vende todo.
 
+### Reportes y PDF
+
+Hay dos caminos para el mismo comprobante:
+
+- **Portal**: **Ventas → Ver** abre el detalle de una venta (fecha, estado,
+  ítems, total y ganancia) con **Descargar PDF**; en el listado, **PDF** baja el
+  reporte completo con los filtros que estén puestos.
+- **App del vendedor**: la pestaña **Ventas** tiene **PDF del día** y cada venta
+  abre su detalle, con **Compartir PDF** e **Imprimir**.
+
+El PDF lo arma cada lado por su cuenta, sin servicios externos: el servidor con
+un generador propio (`server/src/pdf.js`, A4, sin comprimir para poder probarlo)
+y la app con `pdf` + `printing`. **El costo de compra no entra en el PDF de la
+app**; el del portal sí muestra la ganancia, porque es para el administrador.
+
 ### Almacén → vendedores
 
 El almacén es de la casa, no de un teléfono. Al enviar stock a un vendedor:
@@ -90,21 +125,25 @@ El almacén es de la casa, no de un teléfono. Al enviar stock a un vendedor:
 4. Se registra el envío en el historial (`traslados`) y se sube la revisión, así
    que el teléfono recibe el stock nuevo en la próxima sincronización.
 
-El almacén no se sincroniza con los teléfonos: solo ve lo que hay en el depósito
-y lo que ya salió hacia cada vendedor.
+El almacén no se sincroniza con los teléfonos: solo ve lo que hay en el depósito.
+El **stock en manos de cada vendedor** sí sale de los productos sincronizados, así
+que se actualiza con cada venta, reposición o edición.
 
-Se activa con una contraseña en `LIZNACK_ADMIN`:
+### Devoluciones
 
-```bash
-LIZNACK_ADMIN=tu-clave npm start
-```
+Un vendedor puede devolver al almacén lo que todavía tiene. Desde
+**Almacén → En manos de los vendedores**, **Devolver** pide la cantidad:
 
-y queda en `http://<IP-del-servidor>:3000/admin`. Sin esa variable, `/admin`
-muestra **Portal desactivado** y la API sigue funcionando igual.
+1. Se valida contra el stock actual del vendedor (no se puede devolver de más).
+2. Se crea un movimiento negativo con motivo `devolucion`, así que el teléfono lo
+   recibe en la próxima sincronización y descuenta el stock.
+3. Se suma al almacén y se registra el traslado con `tipo = 'devolucion'`.
+4. Si el producto no existía en el almacén, se crea con costo 0 para no inventar
+   un costo de compra.
 
-Lo que el padre cambia ahí (precio, stock, anular una venta, enviar del almacén)
-se guarda con `dispositivo_id = 'portal-admin'` y sube la revisión, así que el
-teléfono lo recibe en la próxima sincronización.
+El historial **Últimos movimientos** muestra envíos y devoluciones con su tipo.
+También se puede **editar** un producto en manos del vendedor (nombre, precio y
+stock) desde esa misma tabla; el cambio sube la revisión y llega al teléfono.
 
 ### Releases automáticos
 
@@ -151,8 +190,8 @@ docker compose logs -f
 docker compose ps
 ```
 
-Pruebas del servidor (20 casos de punta a punta por HTTP, incluido el portal y
-el almacén):
+Pruebas del servidor (22 casos de punta a punta por HTTP, incluidos el portal, el
+almacén, las devoluciones y los PDF):
 
 ```bash
 cd server
@@ -188,6 +227,19 @@ Para instalarlo en un teléfono conectado:
 adb install -r app/build/app/outputs/flutter-apk/app-debug.apk
 ```
 
+### Notas del build de Android
+
+- `shared_preferences_android` está fijado en **2.4.28** con
+  `dependency_overrides`. La 2.5 llama al plugin por JNI y el R8 del build
+  release borra clases de Kotlin: el APK arranca y queda en el splash con
+  `NoSuchMethodError` / `ClassNotFoundException`. La 2.4.28 usa MethodChannel.
+  Si se actualiza, **probar el APK release en un teléfono** antes de publicarlo.
+- El APK release se firma con la configuración de depuración del template de
+  Flutter: sirve para instalar y actualizar, no para publicar en Play.
+- `android/gradle.properties` usa `-Xmx4G -XX:MaxMetaspaceSize=1G`: con `-Xmx8G`
+  el daemon de Gradle se queda sin memoria y muere en máquinas de 8 GB.
+- El build tarda uno o dos minutos y pesa unos 55 MB.
+
 ### Primera vez
 
 1. La cuenta la crea el administrador desde el portal, o se crea desde la app
@@ -218,7 +270,7 @@ desde **Ajustes**, donde esos datos se suben a la cuenta nueva.
 | `venta_items` | `usuario_id`, `id`, `venta_id`, `producto_id`, `nombre`, `precio_centavos`, `cantidad` |
 | `movimientos` | `usuario_id`, `id`, `producto_id`, `cantidad` (+/−), `motivo`, `creado_en`, `dispositivo_id`, `rev` |
 | `almacen` | `id`, `nombre`, `nombre_clave` (único), `costo_centavos`, `precio_centavos`, `stock`, `creado_en` |
-| `traslados` | `id`, `almacen_id`, `usuario_id`, `producto_id`, `cantidad`, `creado_en` |
+| `traslados` | `id`, `almacen_id`, `usuario_id`, `producto_id`, `cantidad`, `tipo` (`envio`/`devolucion`), `creado_en` |
 
 `almacen` y `traslados` son solo del portal: no viajan a los teléfonos. El costo
 de compra (`costo_centavos`) tampoco se copia a `productos`, así que la app del
@@ -333,8 +385,8 @@ El chip de la barra superior (y **Ajustes**) siempre muestra el estado real:
 ## 6. Pruebas
 
 ```bash
-cd server && npm test     # 20 pruebas: auth, sync, idempotencia, conflictos, stock, permisos, portal y almacén
-cd app && flutter test    # 16 pruebas: formato, ventas/stock, widgets y sync real
+cd server && npm test     # 22 pruebas: auth, sync, idempotencia, conflictos, stock, permisos, portal, almacén, devoluciones y PDF
+cd app && flutter test    # 19 pruebas: formato, ventas/stock, PDF, widgets y sync real
 ```
 
 La prueba `app/test/sync_test.dart` **levanta el servidor Node real**, hace una
@@ -353,10 +405,13 @@ PATH; si no está, se saltea sola.
   almacén es otro producto.
 - Los relojes de los teléfonos se usan para ordenar cambios. Un reloj muy
   adelantado gana conflictos de producto (las ventas no se ven afectadas).
+- La ganancia de las ventas viejas se calcula con el costo **actual** del
+  almacén: si se cambia el costo, los reportes anteriores se recalculan.
 - HTTP sin cifrar para la red local (`usesCleartextTraffic`). En producción
   conviene HTTPS y un proxy delante del servidor.
 - El servidor es de un solo proceso y SQLite: alcanza para un puesto de venta.
 - El token de sesión se guarda en las preferencias del teléfono, sin cifrado propio
   (el teléfono ya está bloqueado con PIN; para más seguridad habría que usar el
   almacén cifrado del sistema).
-- No imprime tickets ni cobra con tarjeta; registra la venta en efectivo.
+- No emite comprobantes fiscales ni cobra con tarjeta: el PDF es un resumen de
+  la venta y el cobro se registra en efectivo.
