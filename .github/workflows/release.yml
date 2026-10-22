@@ -61,12 +61,6 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Compilar el APK
-        working-directory: app
-        run: |
-          flutter pub get
-          flutter build apk --release
-
       - name: Versión y tag
         id: version
         working-directory: app
@@ -75,24 +69,47 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION-build.$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
 
+      - name: Compilar el APK
+        working-directory: app
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # LIZNACK_VERSION y LIZNACK_BUILD quedan compilados en la app: son los
+          # que le dicen a qué versión se actualiza. El build es el número de
+          # corrida del workflow, que es lo que cambia en cada release.
+          flutter pub get
+          flutter build apk --release \
+            --dart-define=LIZNACK_VERSION=$VERSION \
+            --dart-define=LIZNACK_BUILD=$GITHUB_RUN_NUMBER
+
       - name: Preparar los archivos
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          cp app/build/app/outputs/flutter-apk/app-release.apk "liznack-$VERSION.apk"
+          # El nombre del APK lleva el número de build: así cada release tiene
+          # un archivo propio y la app sabe cuál es el suyo.
+          cp app/build/app/outputs/flutter-apk/app-release.apk \
+            "liznack-$VERSION-build.$GITHUB_RUN_NUMBER.apk"
           tar czf liznack-servidor.tar.gz \
             --exclude='server/data' \
             --exclude='server/node_modules' \
             server docker-compose.yml .env.example README.md
+          # El APK se publica con su SHA-256: la app lo comprueba antes de
+          # instalar y descarta la descarga si no cuadra.
+          sha256sum \
+            "liznack-$VERSION-build.$GITHUB_RUN_NUMBER.apk" \
+            liznack-servidor.tar.gz > SHA256SUMS
 
       - name: Notas del release
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           {
-            echo "**APK**: instalar \`liznack-$VERSION.apk\` en el teléfono."
+            echo "**APK**: instalar \`liznack-$VERSION-build.$GITHUB_RUN_NUMBER.apk\` en el teléfono."
             echo
             echo "**Servidor**: descomprimir \`liznack-servidor.tar.gz\` y seguir el README, o usar \`docker compose up -d --build\`."
+            echo
+            echo "El APK se puede instalar desde la app: **Ajustes → Actualizaciones**."
             echo
             echo "### Cambios"
             echo
@@ -106,8 +123,9 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           gh release create "$TAG" \
-            "liznack-$VERSION.apk" \
+            "liznack-$VERSION-build.$GITHUB_RUN_NUMBER.apk" \
             "liznack-servidor.tar.gz" \
+            SHA256SUMS \
             --title "Liznack $VERSION · build $GITHUB_RUN_NUMBER" \
             --notes-file notas.md \
             --latest

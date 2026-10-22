@@ -1,6 +1,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- La app sincroniza con un servidor propio en la red local. -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Instalar la actualización que la app se baja de los releases de GitHub.
+         Es un permiso que el usuario concede por aplicación en Ajustes; sin él
+         la app solo puede pedirlo. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+    <!-- Mantener la CPU despierta mientras baja el APK: con la pantalla apagada
+         el sistema duerme el procesador y la descarga se corta a media. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <application
         android:label="Liznack"
         android:name="${applicationName}"
@@ -28,6 +35,17 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Comparte el APK descargado con el instalador del sistema. Desde
+             Android 7 un file:// lanza FileUriExposedException. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

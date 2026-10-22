@@ -16,10 +16,12 @@ demos la contraseña es `dulce123`.
 
 ## Comandos
 
-Flutter no está en el PATH de esta máquina:
+Flutter lo maneja `mise` en esta máquina. El proyecto pide **Dart `^3.13.5`**
+(Flutter 3.47+): con una versión más vieja, `flutter pub get` falla.
 
 ```bash
-export PATH="$HOME/tools/flutter/bin:$PATH"
+mise use --global flutter@3.47.7
+flutter --version
 ```
 
 Servidor (Node 24+; `npm install` no hace falta, no hay dependencias):
@@ -77,15 +79,39 @@ temporal: necesita `node` en el PATH, no un servidor ya corriendo (el README de
   APK release en un teléfono.
 - `android/gradle.properties` usa `-Xmx4G`; con más memoria el daemon de Gradle
   muere en máquinas de 8 GB.
-- El release se firma con la clave debug; el paquete es
-  `com.caramelo.liznack` y el label "Liznack".
+- El release se firma con la clave del repo: `app/android/app/liznack.jks`
+  (alias y contraseña `liznack`). **No se puede cambiar**: Android sólo acepta
+  una actualización firmada con la misma clave, así que cambiarla obliga a
+  reinstalar la app a mano en cada teléfono. La clave vive en el repo a
+  propósito (el repo es público y la app no va a Play); si alguna vez dejó de
+  serlo, la clave puede venir del entorno (`LIZNACK_KEYSTORE`,
+  `LIZNACK_KEYSTORE_PASSWORD`).
+- El paquete es `com.caramelo.liznack` y el label "Liznack".
 - No editar `app/build/`, `.dart_tool/` ni `server/data/` (base real).
+
+## Actualizaciones de la app
+
+- La app se actualiza sola: `app/lib/actualizacion/` (feed, descarga con
+  verificación SHA-256, instalador) y `app/lib/ui/seccion_actualizaciones.dart`
+  (el bloque de **Ajustes → Actualizaciones**).
+- El feed son los releases del **mismo repositorio** en GitHub
+  (`api.github.com/repos/Malkonix/liznack/releases/latest`). No usar otro repo
+  ni un servidor propio: este repo es público y la app se lee sin sesión.
+- El APK se verifica contra el `SHA256SUMS` del release antes de instalar: si
+  no cuadra, se borra y no se instala.
+- La firma la hace Android: la app baja el APK, lo verifica y abre el
+  instalador del sistema (`MainActivity.kt`, canal
+  `com.caramelo.liznack/instalador`). La app no instala nada sola.
+- La versión que corre va compilada en el binario: `--dart-define=LIZNACK_VERSION`
+  y `--dart-define=LIZNACK_BUILD` (el CI los pasa; `LIZNACK_BUILD` es el número
+  de corrida del workflow). El APK de cada release se llama
+  `liznack-<versión>-build.<n>.apk` y el feed lo busca por ese nombre.
 
 ## Release
 
 - Cada push a `main` corre las pruebas y publica un release
-  `v<versión>-build.<run>` con APK y tarball del servidor (versión desde
-  `app/pubspec.yaml`). No pushear trabajo a medias.
+  `v<versión>-build.<run>` con el APK, el tarball del servidor y el
+  `SHA256SUMS` (versión desde `app/pubspec.yaml`). No pushear trabajo a medias.
 - Las notas del release salen de `git log -n 6`: escribir commits concisos en
   español neutral, sin voseo ("instala", no "instalá").
 - Después de cambiar el servidor, reconstruir Docker con

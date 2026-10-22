@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Solo se comparte la carpeta de actualizaciones, no todo el almacenamiento
+     de la app: ahí están la base de ventas y la sesión. -->
+<paths>
+    <cache-path name="actualizaciones" path="actualizaciones/" />
+</paths>

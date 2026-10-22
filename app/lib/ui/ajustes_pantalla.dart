@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../actualizacion/version_app.dart';
 import '../nucleo/formato.dart';
 import '../tienda.dart';
 import 'estado_sync_widget.dart';
+import 'seccion_actualizaciones.dart';
 import 'tema.dart';
 import 'tienda_scope.dart';
 
@@ -237,6 +239,11 @@ class _AjustesPantallaState extends State<AjustesPantalla> {
         ),
         const SizedBox(height: 12),
         _Seccion(
+          titulo: 'Actualizaciones',
+          hijos: const [SeccionActualizaciones()],
+        ),
+        const SizedBox(height: 12),
+        _Seccion(
           titulo: 'Cómo funciona',
           hijos: [
             Text(
@@ -253,7 +260,7 @@ class _AjustesPantallaState extends State<AjustesPantalla> {
         const SizedBox(height: 16),
         Center(
           child: Text(
-            'Liznack 0.1.0 · hecho para vender golosinas',
+            'Liznack ${VersionApp.actual} · hecho para vender golosinas',
             style: TextStyle(fontSize: 11.5, color: Colors.brown.shade300),
           ),
         ),

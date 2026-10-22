@@ -154,8 +154,9 @@ llega en la próxima sincronización.
 Cada push a `main` corre las pruebas del servidor y de la app y, si pasan,
 publica un release con:
 
-- `liznack-<versión>.apk`: la app lista para instalar.
+- `liznack-<versión>-build.<n>.apk`: la app lista para instalar.
 - `liznack-servidor.tar.gz`: el servidor y el `docker-compose.yml`.
+- `SHA256SUMS`: la firma de cada archivo, para comprobarlos.
 
 La versión sale de `version:` en `app/pubspec.yaml` y el número de build del run
 de GitHub, así que no hay que tocar nada a mano. El workflow está en
@@ -165,6 +166,31 @@ de GitHub, así que no hay que tocar nada a mano. El workflow está en
 ```bash
 git push origin main      # pruebas + release
 ```
+
+### Actualizar la app desde la app
+
+La app se actualiza sola, sin buscar el APK a mano: en **Ajustes →
+Actualizaciones** hay un botón que busca la última versión publicada.
+
+- El feed son los **releases de este mismo repositorio** en GitHub
+  (`api.github.com/repos/Malkonix/liznack/releases/latest`). No hay que
+  configurar nada en el teléfono ni usar otra cuenta: el repositorio es
+  público.
+- La app mira sola, una vez por día, al abrir. Si hay versión nueva aparece un
+  aviso; se puede desactivar en el mismo lugar.
+- El APK se descarga y **se comprueba contra el `SHA256SUMS`** del release. Si
+  no cuadra, la descarga se borra y no se instala. Si se corta, se reanuda
+  desde donde iba.
+- Después el sistema muestra su propio diálogo de instalación: la app no
+  instala nada sola. La primera vez Android pide permiso de "instalar apps
+  desconocidas" para Liznack.
+- Los APK se firman con la clave del repo (`app/android/app/liznack.jks`).
+  Android sólo acepta una actualización firmada con la misma clave que la
+  app instalada, así que **no se puede cambiar** sin reinstalar a mano en
+  cada teléfono. La clave no es un secreto: el repositorio es público y la
+  app se instala a mano, sin Play Store. Si algún día el repositorio deja de
+  ser público, la clave puede pasar a venir del entorno
+  (`LIZNACK_KEYSTORE`, `LIZNACK_KEYSTORE_PASSWORD`) o de un secreto del CI.
 
 ### Con Docker (opcional)
 
@@ -194,7 +220,7 @@ docker compose logs -f
 docker compose ps
 ```
 
-Pruebas del servidor (22 casos de punta a punta por HTTP, incluidos el portal, el
+Pruebas del servidor (23 casos de punta a punta por HTTP, incluidos el portal, el
 almacén, las devoluciones y los PDF):
 
 ```bash
@@ -204,11 +230,12 @@ npm test
 
 ## 2. Correr la app
 
-Requisitos: Flutter 3.47+ y Android SDK. En esta máquina Flutter quedó en
-`~/tools/flutter`, así que antes de usarlo:
+Requisitos: **Flutter 3.47 o más nuevo** (el `pubspec.yaml` pide Dart
+`^3.13.5`) y el SDK de Android. En esta máquina Flutter lo maneja `mise`:
 
 ```bash
-export PATH="$HOME/tools/flutter/bin:$PATH"
+mise use --global flutter@3.47.7    # una vez
+flutter --version
 ```
 
 ```bash
@@ -238,8 +265,9 @@ adb install -r app/build/app/outputs/flutter-apk/app-debug.apk
   release borra clases de Kotlin: el APK arranca y queda en el splash con
   `NoSuchMethodError` / `ClassNotFoundException`. La 2.4.28 usa MethodChannel.
   Si se actualiza, **probar el APK release en un teléfono** antes de publicarlo.
-- El APK release se firma con la configuración de depuración del template de
-  Flutter: sirve para instalar y actualizar, no para publicar en Play.
+- El APK release se firma con la clave del repo (`app/android/app/liznack.jks`,
+  alias `liznack`, contraseña `liznack`). Sirve para instalar y para
+  actualizarse desde la app; no para publicar en Play.
 - `android/gradle.properties` usa `-Xmx4G -XX:MaxMetaspaceSize=1G`: con `-Xmx8G`
   el daemon de Gradle se queda sin memoria y muere en máquinas de 8 GB.
 - El build tarda uno o dos minutos y pesa unos 55 MB.
@@ -389,8 +417,8 @@ El chip de la barra superior (y **Ajustes**) siempre muestra el estado real:
 ## 6. Pruebas
 
 ```bash
-cd server && npm test     # 22 pruebas: auth, sync, idempotencia, conflictos, stock, permisos, portal, almacén, devoluciones y PDF
-cd app && flutter test    # 19 pruebas: formato, ventas/stock, PDF, widgets y sync real
+cd server && npm test     # 23 pruebas: auth, sync, idempotencia, conflictos, stock, permisos, portal, almacén, devoluciones y PDF
+cd app && flutter test    # 30 pruebas: formato, ventas/stock, PDF, widgets, sync real y actualizaciones
 ```
 
 La prueba `app/test/sync_test.dart` **levanta el servidor Node real**, hace una
