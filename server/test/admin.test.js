@@ -652,10 +652,9 @@ test('el almacén reparte stock a los vendedores y muestra dónde está cada pro
 
     // El costo de compra se ve en el portal, junto con la ganancia por unidad.
     const sinDueño = await pagina(s.url, '/admin/almacen', cookie);
-    assert.match(sinDueño.texto, /<th class="num">Costo<\/th>/);
-    assert.match(sinDueño.texto, /\$ 3,00/);
-    assert.match(sinDueño.texto, /\$ 2,00/);
-    assert.match(sinDueño.texto, /40%/);
+    assert.match(sinDueño.texto, /Compra → venta/);
+    assert.match(sinDueño.texto, /\$ 3,00 → \$ 5,00/);
+    assert.match(sinDueño.texto, /\+\$ 2,00 · 40%/);
     assert.match(sinDueño.texto, /Invertido/);
     assert.match(sinDueño.texto, /nadie todavía/);
 
