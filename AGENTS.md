@@ -92,6 +92,10 @@ temporal: necesita `node` en el PATH, no un servidor ya corriendo (el README de
   serlo, la clave puede venir del entorno (`LIZNACK_KEYSTORE`,
   `LIZNACK_KEYSTORE_PASSWORD`).
 - El paquete es `com.caramelo.liznack` y el label "Liznack".
+- El ícono es el 🍬 del portal sobre `carameloSuave`: PNG en `res/mipmap-*`
+  para Android 7 y adaptativo (`mipmap-anydpi-v26`, más la silueta de Android 13
+  en `anydpi-v33`). Los colores del fondo están en `res/values/colors.xml`.
+  No volver al logo de Flutter.
 - No editar `app/build/`, `.dart_tool/` ni `server/data/` (base real).
 
 ## Actualizaciones de la app

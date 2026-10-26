@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Fondo del ícono: el caramelo suave del tema (y del recuadro del logo en
+         el portal del administrador). -->
+    <color name="ic_launcher_background">#FFE3EC</color>
+</resources>
