@@ -28,7 +28,11 @@ class _LoginPantallaState extends State<LoginPantalla> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (!_servidorIniciado) {
-      _servidor.text = TiendaScope.of(context).servidorUrl;
+      final tienda = TiendaScope.of(context);
+      _servidor.text = tienda.servidorUrl;
+      // Si la sesión se cayó sola (token vencido), se explica por qué hay que
+      // volver a entrar en vez de dejar al vendedor adivinando.
+      _error = tienda.avisoSesion;
       _servidorIniciado = true;
     }
   }

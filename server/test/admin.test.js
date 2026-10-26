@@ -1225,3 +1225,45 @@ test('cada venta se ve en pantalla y se descarga en PDF', async () => {
     await s.cerrar();
   }
 });
+
+test('un id de producto con HTML no se cuela en el portal', async () => {
+  const s = await arrancar();
+  try {
+    const cookie = await sesionAdmin(s.url);
+    const alta = await api(s.url, '/api/registro', {
+      metodo: 'POST',
+      cuerpo: { email: `xss${randomUUID().slice(0, 8)}@ejemplo.com`, contrasena: 'dulce123' },
+    });
+    const token = alta.datos.token;
+    const usuarioId = alta.datos.usuario.id;
+
+    // El id lo manda el teléfono: el servidor no puede confiar en que sea un
+    // UUID. Si sale crudo en un atributo, esto ejecutaría JavaScript en el
+    // navegador del administrador.
+    const idTrampa = '"><script>alert(1)</script>';
+    await api(s.url, '/api/sync', {
+      metodo: 'POST',
+      token,
+      cuerpo: {
+        dispositivo_id: 'tel-a',
+        ultima_rev: 0,
+        cambios: { productos: [producto({ id: idTrampa, nombre: 'Chocolate' })] },
+      },
+    });
+
+    for (const ruta of ['/admin/inventario', `/admin/cuenta/${usuarioId}`]) {
+      const paginaWeb = await pagina(s.url, ruta, cookie);
+      assert.equal(paginaWeb.estado, 200);
+      assert.doesNotMatch(
+        paginaWeb.texto,
+        /<script>alert/,
+        `${ruta} dejó pasar el HTML del id`,
+      );
+      // El id sigue estando, pero escapado: el diálogo de edición se abre igual.
+      assert.match(paginaWeb.texto, /&quot;&gt;&lt;script&gt;/);
+      assert.match(paginaWeb.texto, /data-abrir="[^"]*&quot;&gt;&lt;script&gt;/);
+    }
+  } finally {
+    await s.cerrar();
+  }
+});

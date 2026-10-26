@@ -197,6 +197,63 @@ void main() {
       expect(resumen['total_centavos'], 300);
     });
 
+    test('un cambio rechazado no se reintenta en cada sincronización', () async {
+      final email = 'rechazo${DateTime.now().microsecondsSinceEpoch}@ejemplo.com';
+      final telefono = await tiendaDePrueba(servidor: baseUrl, almacen: AlmacenMemoria());
+      addTearDown(telefono.cerrar);
+      await telefono.crearCuenta(email: email, clave: 'dulce123');
+
+      // Se inserta directo en la base una fila que la app nunca generaría
+      // (nombre vacío): el servidor la va a rechazar.
+      await telefono.db.insert('productos', {
+        'id': 'producto-invalido',
+        'nombre': '',
+        'precio_centavos': 100,
+        'stock_base': 1,
+        'activo': 1,
+        'actualizado_en': DateTime.now().millisecondsSinceEpoch,
+        'dispositivo_id': telefono.dispositivoId,
+        'usuario_id': telefono.sesion!.usuarioId,
+        'pendiente': 1,
+      });
+
+      await telefono.sincronizar();
+
+      expect(telefono.pendientes, 0, reason: 'no puede quedar como pendiente para siempre');
+      expect(telefono.rechazados, 1);
+      expect(telefono.avisos.join(' '), contains('rechazó'));
+      final fila = (await telefono.db
+              .query('productos', where: 'id = ?', whereArgs: ['producto-invalido']))
+          .single;
+      expect(fila['pendiente'], 2);
+      // El dato sigue en el teléfono: no se borra nada de lo que cargó el usuario.
+      expect(fila['id'], 'producto-invalido');
+
+      // En la siguiente vuelta no se vuelve a mandar.
+      final resultado = await telefono.sync.sincronizar(token: telefono.sesion!.token!);
+      expect(resultado.enviados, 0);
+      await telefono.refrescarEstado();
+      expect(telefono.rechazados, 1);
+      expect(telefono.pendientes, 0);
+
+      // Si el vendedor corrige el dato, se reintenta y llega.
+      await telefono.db.update(
+        'productos',
+        {
+          'nombre': 'Chocolate',
+          'actualizado_en': DateTime.now().millisecondsSinceEpoch + 1000,
+          'pendiente': 1,
+        },
+        where: 'id = ?',
+        whereArgs: ['producto-invalido'],
+      );
+      await telefono.sincronizar();
+      expect(telefono.pendientes, 0);
+      expect(telefono.rechazados, 0);
+      final inventario = await telefono.api.inventario(telefono.sesion!.token!);
+      expect(inventario.single['nombre'], 'Chocolate');
+    });
+
     test('un producto editado en dos lados conserva el cambio más reciente', () async {
       final email = 'conflicto${DateTime.now().microsecondsSinceEpoch}@ejemplo.com';
       final telefonoA = await tiendaDePrueba(servidor: baseUrl, dispositivoId: 'tel-1');

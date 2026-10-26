@@ -328,8 +328,10 @@ export function paginaAlmacen({ items, resumen, traslados, cuentas, porVendedor 
   const filas = items.length
     ? items
         .map((p) => {
-          const dialogoEditar = `alm-editar-${p.id}`;
-          const dialogoEnviar = `alm-enviar-${p.id}`;
+          // Los ids de los diálogos se arman con el id del producto, que viene
+          // del teléfono: se escapan porque terminan dentro de atributos HTML.
+          const dialogoEditar = escapar(`alm-editar-${p.id}`);
+          const dialogoEnviar = escapar(`alm-enviar-${p.id}`);
           const donde = p.vendedores.length
             ? `<div class="vendedores">${p.vendedores
                 .map(
@@ -419,8 +421,10 @@ export function paginaAlmacen({ items, resumen, traslados, cuentas, porVendedor 
         .map((v) => {
           const filasProductos = v.productos
             .map((p) => {
-              const dialogoDevolver = `vnd-devolver-${p.id}`;
-              const dialogoEditar = `vnd-editar-${p.id}`;
+              // El id del producto viene del teléfono: se escapa porque va
+              // dentro de los atributos `id` y `data-abrir`.
+              const dialogoDevolver = escapar(`vnd-devolver-${p.id}`);
+              const dialogoEditar = escapar(`vnd-editar-${p.id}`);
               const base = `/admin/cuenta/${encodeURIComponent(v.id)}/producto/${encodeURIComponent(p.id)}`;
 
               if (p.stock_actual > 0) {
@@ -563,7 +567,9 @@ export function paginaInventario({ productos, totales, cuentas, filtros, flash, 
         .map((p) => {
           const cuentaId = encodeURIComponent(p.usuario_id);
           const base = `/admin/cuenta/${cuentaId}/producto/${encodeURIComponent(p.id)}`;
-          const dialogoId = `inv-editar-${p.id}`;
+          // El id del producto viene del teléfono: se escapa porque va dentro
+          // de los atributos `id` y `data-abrir`.
+          const dialogoId = escapar(`inv-editar-${p.id}`);
           dialogos.push(`<dialog class="modal" id="${dialogoId}">
   <form method="post" action="${base}">
     <h3>Editar producto</h3>
@@ -678,7 +684,9 @@ export function paginaCuenta({ cuenta, productos, ventas, items, movimientos, fl
     ? productos
         .map((p) => {
           const base = `/admin/cuenta/${encodeURIComponent(cuenta.id)}/producto/${encodeURIComponent(p.id)}`;
-          const dialogoId = `editar-${p.id}`;
+          // El id del producto viene del teléfono: se escapa porque va dentro
+          // de los atributos `id` y `data-abrir`.
+          const dialogoId = escapar(`editar-${p.id}`);
           dialogos.push(`<dialog class="modal" id="${dialogoId}">
   <form method="post" action="${base}">
     <h3>Editar producto</h3>

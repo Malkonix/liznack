@@ -220,7 +220,7 @@ docker compose logs -f
 docker compose ps
 ```
 
-Pruebas del servidor (23 casos de punta a punta por HTTP, incluidos el portal, el
+Pruebas del servidor (25 casos de punta a punta por HTTP, incluidos el portal, el
 almacén, las devoluciones y los PDF):
 
 ```bash
@@ -417,8 +417,8 @@ El chip de la barra superior (y **Ajustes**) siempre muestra el estado real:
 ## 6. Pruebas
 
 ```bash
-cd server && npm test     # 23 pruebas: auth, sync, idempotencia, conflictos, stock, permisos, portal, almacén, devoluciones y PDF
-cd app && flutter test    # 31 pruebas: formato, ventas/stock, PDF, widgets, sync real y actualizaciones
+cd server && npm test     # 25 pruebas: auth, sync, idempotencia, conflictos, stock, permisos, portal, almacén, devoluciones y PDF
+cd app && flutter test    # 33 pruebas: formato, ventas/stock, PDF, widgets, sync real y actualizaciones
 ```
 
 La prueba `app/test/sync_test.dart` **levanta el servidor Node real**, hace una

@@ -78,6 +78,39 @@ function venta(productoId, cantidad, extra = {}) {
 const sincronizar = (url, token, cuerpo) =>
   pedir(url, '/api/sync', { metodo: 'POST', token, cuerpo });
 
+/**
+ * Baja todo lo que el servidor tenga para la cuenta, página por página, como
+ * lo hace el teléfono. Devuelve las filas por id (así se ven los repetidos) y
+ * las páginas que hizo falta pedir.
+ */
+async function bajarTodo(url, token) {
+  const productos = new Map();
+  const ventas = new Map();
+  const paginas = [];
+  let desde = 0;
+  for (let intento = 0; intento < 50; intento++) {
+    const r = await sincronizar(url, token, {
+      dispositivo_id: 'tel-lector',
+      ultima_rev: desde,
+      cambios: {},
+    });
+    assert.equal(r.estado, 200, JSON.stringify(r.datos));
+    for (const p of r.datos.cambios.productos) productos.set(p.id, p);
+    for (const v of r.datos.cambios.ventas) ventas.set(v.id, v);
+    paginas.push({
+      desde,
+      rev: r.datos.ultima_rev,
+      hay_mas: r.datos.hay_mas,
+      productos: r.datos.cambios.productos.length,
+      ventas: r.datos.cambios.ventas.length,
+    });
+    if (!r.datos.hay_mas) return { productos, ventas, paginas };
+    assert.ok(r.datos.ultima_rev > desde, `la página no avanzó: rev ${r.datos.ultima_rev}`);
+    desde = r.datos.ultima_rev;
+  }
+  assert.fail('demasiadas páginas: la paginación no termina');
+}
+
 test('registro, login y sesión', async (t) => {
   const s = await arrancar();
   t.after(s.cerrar);
@@ -268,6 +301,49 @@ test('ajustes de stock se suman y son idempotentes', async (t) => {
 
   const inventario = await pedir(s.url, '/api/inventario', { token });
   assert.equal(inventario.datos.productos[0].stock_actual, 26);
+});
+
+test('la paginación no pierde filas cuando el corte de una tabla queda antes que el de otra', async (t) => {
+  const s = await arrancar();
+  t.after(s.cerrar);
+  const { token } = await cuenta(s.url);
+
+  // Los 500 productos llenan la página; los 20 siguientes quedan justo
+  // después del corte de productos. Las ventas que vienen después tienen rev
+  // más alto que ese corte: si la página avanza hasta el rev de las ventas, los
+  // últimos 20 productos se pierden para siempre.
+  const primerLote = Array.from({ length: 500 }, (_, i) =>
+    producto({ nombre: `Dulce ${String(i).padStart(3, '0')}` }));
+  await sincronizar(s.url, token, {
+    dispositivo_id: 'tel-a',
+    ultima_rev: 0,
+    cambios: { productos: primerLote },
+  });
+
+  const segundoLote = Array.from({ length: 20 }, (_, i) => producto({ nombre: `Nuevo ${i}` }));
+  await sincronizar(s.url, token, {
+    dispositivo_id: 'tel-a',
+    ultima_rev: 0,
+    cambios: { productos: segundoLote },
+  });
+
+  const ventas = Array.from({ length: 5 }, () => venta(primerLote[0].id, 1));
+  await sincronizar(s.url, token, {
+    dispositivo_id: 'tel-a',
+    ultima_rev: 0,
+    cambios: { ventas },
+  });
+
+  const { productos, ventas: recibidas, paginas } = await bajarTodo(s.url, token);
+
+  assert.equal(productos.size, 520, `llegaron ${productos.size} de 520 productos (${JSON.stringify(paginas)})`);
+  assert.equal(recibidas.size, 5, 'tienen que llegar las 5 ventas');
+  for (const p of [...primerLote, ...segundoLote]) {
+    assert.ok(productos.has(p.id), `falta el producto ${p.nombre}`);
+  }
+  for (const v of ventas) assert.ok(recibidas.has(v.id), `falta la venta ${v.id}`);
+  // Ninguna página repite lo ya mandado: el cliente lo vería como un cambio.
+  assert.ok(paginas.length > 1, 'la prueba tiene que paginar de verdad');
 });
 
 test('datos inválidos se rechazan y cada cuenta ve solo lo suyo', async (t) => {

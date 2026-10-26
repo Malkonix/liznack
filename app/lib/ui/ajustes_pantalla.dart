@@ -157,6 +157,11 @@ class _AjustesPantallaState extends State<AjustesPantalla> {
             ),
             const SizedBox(height: 10),
             _Dato(etiqueta: 'Cambios por enviar', valor: '${tienda.pendientes}'),
+            if (tienda.rechazados > 0)
+              _Dato(
+                etiqueta: 'Rechazados por el servidor',
+                valor: '${tienda.rechazados}',
+              ),
             _Dato(
               etiqueta: 'Última sincronización',
               valor: tienda.ultimaVez == null ? 'Todavía no' : fechaHoraLarga(tienda.ultimaVez!),
@@ -164,6 +169,14 @@ class _AjustesPantallaState extends State<AjustesPantalla> {
             if (tienda.error != null) ...[
               const SizedBox(height: 8),
               Text(tienda.error!, style: const TextStyle(color: rojoError, fontSize: 13)),
+            ],
+            if (tienda.rechazados > 0) ...[
+              const SizedBox(height: 4),
+              Text(
+                'Un cambio rechazado sigue en este teléfono, pero no viaja al servidor. '
+                'Corregilo y guardalo de nuevo para reintentarlo.',
+                style: TextStyle(fontSize: 12, color: Colors.brown.shade400),
+              ),
             ],
             for (final aviso in tienda.avisos)
               Padding(

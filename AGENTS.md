@@ -53,6 +53,11 @@ temporal: necesita `node` en el PATH, no un servidor ya corriendo (el README de
   los ítems y no duplica ventas por UUID.
 - Cada cambio aceptado sube `rev` (por usuario); el teléfono pide `rev >
   ultima_rev` y pagina con `hay_mas`.
+- La página avanza hasta el corte **más chico** de las tablas que se cortaron,
+  no hasta el más grande: `rev` es único por usuario y avanzar de más saltearía
+  filas de la otra tabla para siempre (`obtenerCambios` en `server/src/sync.js`).
+- En el teléfono `pendiente` vale 1 (por subir), 2 (el servidor lo rechazó: no
+  se reintenta solo; se corrige el dato y vuelve a 1) o 0 (sincronizado).
 - Las migraciones son manuales en `migrar()` (`server/src/db.js`) con
   `PRAGMA table_info`: agregar la columna ahí, no hay framework.
 - `traslados.tipo` es `envio` o `devolucion`. Una devolución valida contra el

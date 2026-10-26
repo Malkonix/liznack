@@ -273,9 +273,27 @@ export function obtenerCambios(db, usuarioId, desdeRev) {
     movimientos: movimientos.length > LIMITE_MOVIMIENTOS,
   };
   const recortar = (filas, limite) => filas.slice(0, limite);
-  const productosFinal = recortar(productos, LIMITE_PRODUCTOS);
-  const ventasFinal = recortar(ventas, LIMITE_VENTAS);
-  const movimientosFinal = recortar(movimientos, LIMITE_MOVIMIENTOS);
+  const productosCortados = recortar(productos, LIMITE_PRODUCTOS);
+  const ventasCortadas = recortar(ventas, LIMITE_VENTAS);
+  const movimientosCortados = recortar(movimientos, LIMITE_MOVIMIENTOS);
+
+  // El `rev` es un contador único por usuario, no uno por tabla. Si una tabla
+  // se corta en el rev 500 y otra en el 800, la página no puede avanzar hasta
+  // el 800: las filas de la primera con rev 501..800 quedarían afuera para
+  // siempre. Se avanza hasta el corte MÁS CHICO y todo lo que tenga rev mayor
+  // se manda en las páginas siguientes. Cada página siempre avanza, porque
+  // las filas devueltas tienen rev > desde.
+  const cortes = [];
+  if (hay.productos) cortes.push(productosCortados.at(-1).rev);
+  if (hay.ventas) cortes.push(ventasCortadas.at(-1).rev);
+  if (hay.movimientos) cortes.push(movimientosCortados.at(-1).rev);
+  const hayMas = cortes.length > 0;
+  const corte = hayMas ? Math.min(...cortes) : null;
+  const hastaElCorte = (filas) => (hayMas ? filas.filter((f) => f.rev <= corte) : filas);
+
+  const productosFinal = hastaElCorte(productosCortados);
+  const ventasFinal = hastaElCorte(ventasCortadas);
+  const movimientosFinal = hastaElCorte(movimientosCortados);
 
   const itemsPorVenta = new Map();
   if (ventasFinal.length > 0) {
@@ -293,17 +311,9 @@ export function obtenerCambios(db, usuarioId, desdeRev) {
     }
   }
 
-  const maxRev = Math.max(
-    desde,
-    ...productosFinal.map((p) => p.rev),
-    ...ventasFinal.map((v) => v.rev),
-    ...movimientosFinal.map((m) => m.rev),
-  );
-  const hayMas = hay.productos || hay.ventas || hay.movimientos;
-
   return {
     // Si no hay más páginas, avanzamos directo al último rev del servidor.
-    rev: hayMas ? maxRev : Math.max(revActual(db, usuarioId), desde),
+    rev: hayMas ? corte : Math.max(revActual(db, usuarioId), desde),
     hay_mas: hayMas,
     productos: productosFinal.map(({ rev, ...resto }) => ({ ...resto, activo: resto.activo === 1 })),
     movimientos: movimientosFinal.map(({ rev, ...resto }) => resto),

@@ -21,13 +21,20 @@ class ResultadoSincronizacion {
 class EstadoGuardado {
   const EstadoGuardado({
     required this.pendientes,
+    required this.rechazados,
     required this.ultimaVez,
     required this.error,
     required this.avisos,
     required this.ultimaRev,
   });
 
+  /// Cambios esperando subir.
   final int pendientes;
+
+  /// Cambios que el servidor rechazó y ya no se reintentan solos: siguen en el
+  /// teléfono, pero no van a llegar a la nube hasta que se corrijan.
+  final int rechazados;
+
   final DateTime? ultimaVez;
   final String? error;
   final List<String> avisos;
@@ -35,6 +42,7 @@ class EstadoGuardado {
 
   static const vacio = EstadoGuardado(
     pendientes: 0,
+    rechazados: 0,
     ultimaVez: null,
     error: null,
     avisos: [],
@@ -92,6 +100,16 @@ class SyncService {
     return (filas.first['total'] as int?) ?? 0;
   }
 
+  /// Cambios que el servidor rechazó (`pendiente = 2`).
+  Future<int> contarRechazados() async {
+    final filas = await db.rawQuery('''
+      SELECT (SELECT COUNT(*) FROM productos   WHERE pendiente = 2 AND usuario_id = ?)
+           + (SELECT COUNT(*) FROM ventas      WHERE pendiente = 2 AND usuario_id = ?)
+           + (SELECT COUNT(*) FROM movimientos WHERE pendiente = 2 AND usuario_id = ?) AS total
+    ''', [usuarioId, usuarioId, usuarioId]);
+    return (filas.first['total'] as int?) ?? 0;
+  }
+
   Future<int> leerRev() async => int.tryParse(await _meta('ultima_rev') ?? '0') ?? 0;
 
   Future<void> reiniciarRevision() async {
@@ -104,6 +122,7 @@ class SyncService {
 
   Future<EstadoGuardado> leerEstado() async {
     final pendientes = await contarPendientes();
+    final rechazados = await contarRechazados();
     final milisegundos = int.tryParse(await _meta('ultima_sync') ?? '');
     final error = await _meta('ultimo_error');
     final avisosJson = await _meta('avisos');
@@ -117,6 +136,7 @@ class SyncService {
     }
     return EstadoGuardado(
       pendientes: pendientes,
+      rechazados: rechazados,
       ultimaVez: milisegundos == null || milisegundos == 0
           ? null
           : DateTime.fromMillisecondsSinceEpoch(milisegundos),
@@ -142,18 +162,20 @@ class SyncService {
           cambios: pagina == 0 ? envio.aJson() : const {},
         );
 
-        final cambioRev = respuesta.ultimaRev >= ultimaRev;
+        final avanzo = respuesta.ultimaRev > ultimaRev;
         await _aplicarRespuesta(
           respuesta: respuesta,
           envio: pagina == 0 ? envio : null,
           avisos: avisos,
         );
         recibidos += respuesta.productos.length + respuesta.ventas.length + respuesta.movimientos.length;
-        if (cambioRev) {
+        if (avanzo) {
           ultimaRev = respuesta.ultimaRev;
           await _guardarMeta('ultima_rev', '$ultimaRev');
         }
-        if (!respuesta.hayMas) break;
+        // Si el servidor dice que hay más pero no avanzó, insistir sólo repetiría
+        // la misma página 25 veces: lo que falte llega en la próxima sincronización.
+        if (!respuesta.hayMas || !avanzo) break;
       }
 
       await _guardarMeta('ultimo_error', '');
@@ -272,7 +294,8 @@ class SyncService {
         if (tipo == 'venta') rechazadosVentas.add(id);
         if (tipo == 'movimiento') rechazadosMovimientos.add(id);
       }
-      avisos.add('El servidor rechazó un cambio: $motivo.');
+      avisos.add('El servidor rechazó un cambio: $motivo. '
+          'Queda guardado en el teléfono, pero no se vuelve a enviar solo.');
     }
     for (final conflicto in respuesta.conflictos) {
       final mensaje = conflicto['mensaje'];
@@ -305,7 +328,15 @@ class SyncService {
 
       if (envio != null) {
         for (final producto in envio.productos.entries) {
-          if (rechazadosProductos.contains(producto.key)) continue;
+          if (rechazadosProductos.contains(producto.key)) {
+            await _marcarRechazado(
+              txn,
+              'productos',
+              producto.key,
+              actualizadoEn: producto.value['actualizado_en'],
+            );
+            continue;
+          }
           await txn.update(
             'productos',
             {'pendiente': 0},
@@ -314,7 +345,15 @@ class SyncService {
           );
         }
         for (final venta in envio.ventas.entries) {
-          if (rechazadosVentas.contains(venta.key)) continue;
+          if (rechazadosVentas.contains(venta.key)) {
+            await _marcarRechazado(
+              txn,
+              'ventas',
+              venta.key,
+              actualizadoEn: venta.value['actualizado_en'],
+            );
+            continue;
+          }
           await txn.update(
             'ventas',
             {'pendiente': 0},
@@ -323,7 +362,10 @@ class SyncService {
           );
         }
         for (final movimiento in envio.movimientos.keys) {
-          if (rechazadosMovimientos.contains(movimiento)) continue;
+          if (rechazadosMovimientos.contains(movimiento)) {
+            await _marcarRechazado(txn, 'movimientos', movimiento);
+            continue;
+          }
           await txn.update(
             'movimientos',
             {'pendiente': 0},
@@ -333,6 +375,32 @@ class SyncService {
         }
       }
     });
+  }
+
+  /// Saca de la cola un cambio que el servidor rechazó: pasa a `pendiente = 2`.
+  ///
+  /// La fila se queda como está en el teléfono (no se pierde lo que cargó el
+  /// vendedor), pero deja de enviarse. Sin esto el servidor la rechazaría en
+  /// cada sincronización: el contador de pendientes nunca bajaría y el aviso se
+  /// repetiría para siempre. Si el vendedor corrige el dato, el repositorio la
+  /// vuelve a marcar `pendiente = 1` y se reintenta una vez.
+  ///
+  /// Se comprueba `actualizado_en` para no marcar como rechazado un cambio
+  /// nuevo que se hizo mientras viajaba la respuesta.
+  Future<void> _marcarRechazado(
+    Transaction txn,
+    String tabla,
+    String id, {
+    Object? actualizadoEn,
+  }) async {
+    await txn.update(
+      tabla,
+      {'pendiente': 2},
+      where: actualizadoEn == null
+          ? 'id = ? AND pendiente = 1'
+          : 'id = ? AND pendiente = 1 AND actualizado_en = ?',
+      whereArgs: actualizadoEn == null ? [id] : [id, actualizadoEn],
+    );
   }
 
   bool _ganaRemoto(int remotoEn, String remotoDispositivo, int localEn, String localDispositivo) {

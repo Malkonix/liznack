@@ -59,8 +59,17 @@ class Tienda extends ChangeNotifier {
   Timer? _periodico;
   Future<void> _refresco = Future<void>.value();
 
+  /// Mensaje para la pantalla de ingreso cuando la sesión se cayó sola (el
+  /// servidor ya no reconoce el token). No se guarda: vive hasta el ingreso.
+  String? avisoSesion;
+
   int get version => _version;
   int get pendientes => _estado.pendientes;
+
+  /// Cambios que el servidor rechazó y esperan que alguien los corrija en el
+  /// teléfono: no se reintentan solos.
+  int get rechazados => _estado.rechazados;
+
   DateTime? get ultimaVez => _estado.ultimaVez;
   String? get error => _error;
   List<String> get avisos => _avisos;
@@ -128,7 +137,15 @@ class Tienda extends ChangeNotifier {
       _error = null;
       _avisos = resultado.avisos;
     } on ErrorApi catch (error) {
-      _error = error.mensaje;
+      if (error.codigo == 401) {
+        // El servidor ya no reconoce el token (venció o se reinició la base).
+        // Reintentar con el mismo token sólo muestra errores: se cierra la
+        // sesión y se pide entrar de nuevo. Los datos del teléfono no se tocan.
+        avisoSesion = 'La sesión venció. Entrá de nuevo para seguir sincronizando.';
+        await cerrarSesion();
+      } else {
+        _error = error.mensaje;
+      }
     } catch (_) {
       _error = 'No se pudo sincronizar.';
     } finally {
@@ -216,6 +233,7 @@ class Tienda extends ChangeNotifier {
   }
 
   Future<void> _adoptarCuenta(ResultadoSesion resultado) async {
+    avisoSesion = null;
     // El dueño de los datos locales se guarda aparte de la sesión: si alguien
     // cierra sesión y entra con otra cuenta, no debe heredar ventas ajenas.
     final propietario = await _leerPropietario();
