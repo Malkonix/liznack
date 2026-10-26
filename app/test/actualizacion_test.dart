@@ -15,6 +15,7 @@ import 'package:pub_semver/pub_semver.dart';
 Map<String, dynamic> releaseJson({
   String etiqueta = 'v0.1.0-build.8',
   List<String> nombres = const ['liznack-0.1.0-build.8.apk', 'SHA256SUMS'],
+  int tamanoApk = 1234,
 }) {
   return {
     'tag_name': etiqueta,
@@ -25,7 +26,7 @@ Map<String, dynamic> releaseJson({
       for (final nombre in nombres)
         {
           'name': nombre,
-          'size': 1234,
+          'size': nombre.endsWith('.apk') ? tamanoApk : 1234,
           'browser_download_url':
               'https://github.com/Malkonix/liznack/releases/download/$etiqueta/$nombre',
         }
@@ -197,6 +198,56 @@ void main() {
       // No queda ni el APK ni el fichero a medias.
       expect(File('${temp.path}/liznack-0.1.0-build.8.apk').existsSync(), isFalse);
       expect(File('${temp.path}/liznack-0.1.0-build.8.apk.part').existsSync(), isFalse);
+    });
+
+    test('si lo bajado ya está completo, no se vuelve a pedir', () async {
+      // Pasa si la app se cerró después de terminar la descarga y antes de
+      // instalarla: pedir el resto daría 416 y quedaría trabada.
+      const contenido = 'un APK de mentira';
+      final parcial =
+          File('${temp.path}/liznack-0.1.0-build.8.apk.part');
+      await parcial.writeAsString(contenido);
+
+      final rutasInstaladas = <String>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+        const MethodChannel('com.caramelo.liznack/instalador'),
+        (llamada) async {
+          if (llamada.method == 'instalar') {
+            rutasInstaladas.add((llamada.arguments as Map)['ruta'] as String);
+          }
+          return null;
+        },
+      );
+      addTearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(
+                const MethodChannel('com.caramelo.liznack/instalador'), null);
+      });
+
+      var pedidosDelApk = 0;
+      final cliente = MockClient((peticion) async {
+        if (peticion.url.path.endsWith('SHA256SUMS')) {
+          return http.Response('${shaDe(contenido)}  liznack-0.1.0-build.8.apk\n', 200);
+        }
+        pedidosDelApk++;
+        return http.Response.bytes(utf8.encode(contenido), 200);
+      });
+
+      final servicio = ServicioActualizacion(
+        feed: FeedActualizaciones(cliente: cliente),
+        cliente: cliente,
+        directorio: () async => temp,
+      );
+
+      final release = FeedActualizaciones.leer(
+        releaseJson(tamanoApk: utf8.encode(contenido).length),
+      );
+      await servicio.descargarEInstalar(release);
+
+      expect(pedidosDelApk, 0, reason: 'no debía pedir el APK de nuevo');
+      expect(rutasInstaladas, hasLength(1));
+      expect(await File(rutasInstaladas.first).readAsString(), contenido);
     });
   });
 }

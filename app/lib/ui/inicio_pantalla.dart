@@ -1,8 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
-import '../actualizacion/revisor.dart';
-import '../actualizacion/servicio_actualizacion.dart';
+import '../actualizacion/feed_actualizaciones.dart';
 import 'ajustes_pantalla.dart';
 import 'estado_sync_widget.dart';
 import 'inventario_pantalla.dart';
@@ -10,7 +9,13 @@ import 'vender_pantalla.dart';
 import 'ventas_pantalla.dart';
 
 class InicioPantalla extends StatefulWidget {
-  const InicioPantalla({super.key});
+  const InicioPantalla({super.key, this.versionNueva});
+
+  /// La versión nueva que encontró la revisión diaria, si la hay.
+  ///
+  /// La revisión la hace `LiznackApp` al arrancar (ver `app.dart`): acá sólo se
+  /// avisa. Nulo en las pruebas y cuando la revisión automática está apagada.
+  final ValueListenable<ReleaseInfo?>? versionNueva;
 
   @override
   State<InicioPantalla> createState() => _InicioPantallaState();
@@ -21,39 +26,39 @@ class _InicioPantallaState extends State<InicioPantalla> {
 
   static const _titulos = ['Vender', 'Inventario', 'Ventas', 'Ajustes'];
 
+  /// La última etiqueta que ya se avisó, para no repetir el aviso.
+  String? _avisada;
+
   @override
   void initState() {
     super.initState();
-    _revisarActualizaciones();
+    widget.versionNueva?.addListener(_avisarVersionNueva);
+    // Si la revisión terminó antes de que se abriera esta pantalla (o la app
+    // venía del ingreso), el aviso se muestra igual al primer frame.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _avisarVersionNueva());
   }
 
-  /// Mira, una vez por día, si hay una versión nueva publicada. Si la hay,
-  /// avisa con un botón que lleva a Ajustes. Si no hay red, no pasa nada.
-  Future<void> _revisarActualizaciones() async {
-    final servicio = ServicioActualizacion();
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final revisor = Revisor(servicio: servicio, prefs: prefs);
-      final release = await revisor.revisarSiToca();
-      if (release == null || !mounted) return;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Hay una versión ${release.version} disponible.'),
-            action: SnackBarAction(
-              label: 'Ver',
-              onPressed: () => setState(() => _indice = 3),
-            ),
-            duration: const Duration(seconds: 10),
-          ),
-        );
-      });
-    } catch (_) {
-      // Sin red o sin releases: no es para tanto.
-    } finally {
-      servicio.cerrar();
-    }
+  @override
+  void dispose() {
+    widget.versionNueva?.removeListener(_avisarVersionNueva);
+    super.dispose();
+  }
+
+  /// Avisa una sola vez por versión y lleva a Ajustes, donde está el botón.
+  void _avisarVersionNueva() {
+    final release = widget.versionNueva?.value;
+    if (!mounted || release == null || release.etiqueta == _avisada) return;
+    _avisada = release.etiqueta;
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      SnackBar(
+        content: Text('Hay una versión ${release.version} disponible.'),
+        action: SnackBarAction(
+          label: 'Ver',
+          onPressed: () => setState(() => _indice = 3),
+        ),
+        duration: const Duration(seconds: 10),
+      ),
+    );
   }
 
   @override

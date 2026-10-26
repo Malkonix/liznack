@@ -50,11 +50,22 @@ class _SeccionActualizacionesState extends State<SeccionActualizaciones> {
   }
 
   Future<void> _cargarPreferencias() async {
-    final prefs = await SharedPreferences.getInstance();
-    final revisor = widget.revisor ?? Revisor(servicio: _servicio, prefs: prefs);
-    _revisor = revisor;
-    final auto = await revisor.automatico();
-    if (mounted) setState(() => _auto = auto);
+    // Si el teléfono no tiene preferencias disponibles (por ejemplo en una
+    // prueba de widgets), el bloque funciona igual: solo no recuerda la
+    // elección de "revisar sola".
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final revisor =
+          widget.revisor ?? Revisor(servicio: _servicio, prefs: prefs);
+      final auto = await revisor.automatico();
+      if (!mounted) return;
+      setState(() {
+        _revisor = revisor;
+        _auto = auto;
+      });
+    } catch (_) {
+      // Sin preferencias se sigue sin la opción de revisar sola.
+    }
   }
 
   Future<void> _buscar() async {
@@ -218,16 +229,22 @@ class _SeccionActualizacionesState extends State<SeccionActualizaciones> {
           label: Text(_buscando ? 'Buscando…' : 'Buscar actualización'),
         ),
         const SizedBox(height: 4),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          value: _auto,
-          onChanged: _alternarAuto,
-          title: const Text('Revisar sola', style: TextStyle(fontSize: 13.5)),
-          subtitle: Text(
-            'Mira si hay versión nueva al abrir la app, como mucho una vez por día.',
-            style: TextStyle(fontSize: 12, color: Colors.brown.shade400),
+        // El bloque de ajustes pinta su propio fondo, y un ListTile dentro de
+        // un DecoratedBox pierde el efecto del toque: por eso el Material.
+        if (_revisor != null)
+          Material(
+            type: MaterialType.transparency,
+            child: SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: _auto,
+              onChanged: _alternarAuto,
+              title: const Text('Revisar sola', style: TextStyle(fontSize: 13.5)),
+              subtitle: Text(
+                'Mira si hay versión nueva al abrir la app, como mucho una vez por día.',
+                style: TextStyle(fontSize: 12, color: Colors.brown.shade400),
+              ),
+            ),
           ),
-        ),
         Text(
           'La descarga se comprueba contra el SHA-256 publicado con la versión. Si no '
           'cuadra, se descarta y no se instala. Si se corta, se reanuda donde iba.',

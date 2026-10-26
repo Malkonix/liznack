@@ -418,7 +418,7 @@ El chip de la barra superior (y **Ajustes**) siempre muestra el estado real:
 
 ```bash
 cd server && npm test     # 23 pruebas: auth, sync, idempotencia, conflictos, stock, permisos, portal, almacén, devoluciones y PDF
-cd app && flutter test    # 30 pruebas: formato, ventas/stock, PDF, widgets, sync real y actualizaciones
+cd app && flutter test    # 31 pruebas: formato, ventas/stock, PDF, widgets, sync real y actualizaciones
 ```
 
 La prueba `app/test/sync_test.dart` **levanta el servidor Node real**, hace una

@@ -12,3 +12,9 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
+
+# ...menos la de Liznack, que sí va al repo a propósito: Android sólo instala
+# una actualización si está firmada con la misma clave, el repositorio es
+# público y la app se instala a mano (no va a Play Store). Ver el comentario en
+# app/build.gradle.kts.
+!app/liznack.jks

@@ -101,7 +101,12 @@ class ServicioActualizacion {
 
       // Si falla, el fichero a medias NO se borra: la próxima vez se reanuda
       // desde ahí en vez de volver a bajar el APK entero.
-      final real = await _descargar(release.apkUrl, parcial, onProgreso);
+      final real = await _descargar(
+        release.apkUrl,
+        parcial,
+        tamano: release.apkTamano,
+        onProgreso: onProgreso,
+      );
 
       if (real != esperado) {
         // Aquí sí se borra: lo descargado no sirve y reanudarlo perpetuaría
@@ -154,7 +159,17 @@ class ServicioActualizacion {
   /// Reanuda si ya hay un fichero a medias: pide el resto con una cabecera
   /// `Range` y vuelve a pasar por el hash lo ya descargado, para que el
   /// SHA-256 final cubra el fichero entero y no solo el último tramo.
-  Future<String> _descargar(Uri uri, File destino, Progreso? onProgreso) async {
+  ///
+  /// [tamano] es el tamaño que el release dice que tiene el APK. Sirve para no
+  /// pedir nada cuando el fichero a medias ya está completo (por ejemplo si la
+  /// app se cerró justo después de terminar de bajar): un `Range` desde el
+  /// final daría 416 y la descarga quedaría trabada para siempre.
+  Future<String> _descargar(
+    Uri uri,
+    File destino, {
+    required int tamano,
+    Progreso? onProgreso,
+  }) async {
     var yaTengo = await destino.exists() ? await destino.length() : 0;
     final hash = _HashAcumulador();
 
@@ -162,6 +177,13 @@ class ServicioActualizacion {
       await for (final trozo in destino.openRead()) {
         hash.anadir(trozo);
       }
+    }
+
+    if (tamano > 0 && yaTengo >= tamano) {
+      // Ya está entero: sólo hay que calcularle el hash.
+      hash.cerrar();
+      onProgreso?.call(yaTengo, yaTengo);
+      return hash.hex;
     }
 
     final peticion = http.Request('GET', uri);
@@ -181,6 +203,10 @@ class ServicioActualizacion {
       hash.reiniciar();
       await destino.delete();
     } else if (resp.statusCode != 200 && resp.statusCode != 206) {
+      // 416: el servidor no puede servir desde el byte que ya tenemos (el
+      // fichero a medias no cuadra). Se borra para que el próximo intento
+      // empiece de cero en vez de quedar trabado.
+      if (resp.statusCode == 416 && await destino.exists()) await destino.delete();
       throw ErrorActualizacion('La descarga respondió ${resp.statusCode}.');
     }
 

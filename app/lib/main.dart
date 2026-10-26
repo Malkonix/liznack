@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app.dart';
+import 'actualizacion/revisor.dart';
+import 'actualizacion/servicio_actualizacion.dart';
 import 'datos/base_datos.dart';
 import 'datos/catalogo_repo.dart';
 import 'datos/ventas_repo.dart';
@@ -37,5 +39,12 @@ Future<void> main() async {
   );
 
   await tienda.iniciar();
-  runApp(LiznackApp(tienda: tienda));
+
+  // La revisión de actualizaciones va inyectada: si no se pasa, la app no
+  // toca la red ni las preferencias por su cuenta.
+  final revisor = Revisor(
+    servicio: ServicioActualizacion(),
+    prefs: prefs,
+  );
+  runApp(LiznackApp(tienda: tienda, revisor: revisor));
 }
